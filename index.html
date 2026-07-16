@@ -377,7 +377,7 @@ function stackedSvg(buckets,series,H){
   var step=innerW/buckets.length;
   var bw=Math.max(2,Math.min(22,step-2));
   var h='<svg role="img" aria-label="Stacked bar chart" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" shape-rendering="crispEdges">';
-  var ticks=4;
+  var ticks=Math.max(1,Math.min(4,max));
   for(var i=0;i<=ticks;i++){
     var v=Math.round(max*i/ticks),y=padT+innerH-innerH*i/ticks;
     h+='<line x1="'+padL+'" y1="'+y+'" x2="'+W+'" y2="'+y+'" stroke="var(--grid)" stroke-width="1"/>';
@@ -505,7 +505,12 @@ function renderTrend(filtered){
   attachTooltip(box,mk.buckets,series);
   var notes=[];
   if(emphasis)notes.push('Emphasis view: colored = entries matching the tag filter, gray = everything else in view.');
-  notes.push('Corrections and miscalcs plot by event date where their evidence carries one; the register backfill day (Jul 3) is real data.');
+  notes.push('Corrections and miscalcs plot by event date where their evidence carries one.');
+  var byDay={},tot=0;
+  entries.forEach(function(e){if(e.date_logged){byDay[e.date_logged]=(byDay[e.date_logged]||0)+1;tot++}});
+  var topDay=null,topN=0;
+  Object.keys(byDay).forEach(function(d){if(byDay[d]>topN){topN=byDay[d];topDay=d}});
+  if(tot>=20&&topN/tot>0.25)notes.push(topN+' entries share one logged date ('+shortDate(topDay)+') — a bulk backfill, not a real spike.');
   note.textContent=notes.join(' ');
 }
 
