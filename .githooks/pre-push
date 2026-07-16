@@ -1,0 +1,20 @@
+#!/bin/bash
+# logboard guard: scan every text blob in each outgoing tree for home paths or
+# register entry headings; abort the push on any hit.
+set -euo pipefail
+
+home_pat='/Use''rs/'
+entry_pat='^### (E|CE|C|M)[0-9]'
+zero=0000000000000000000000000000000000000000
+
+while read -r _lref lsha _rref _rsha; do
+  [ "$lsha" = "$zero" ] && continue
+  while IFS= read -r f; do
+    if git show "$lsha:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
+      echo "pre-push: '$f' matches a forbidden pattern; push aborted" >&2
+      exit 1
+    fi
+  done < <(git ls-tree -r --name-only "$lsha")
+done
+
+exit 0

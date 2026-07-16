@@ -1,0 +1,27 @@
+#!/bin/bash
+# logboard guard: only allowlisted paths may be committed, and no staged line
+# may contain a home path or a register entry heading. Local data stays local.
+set -euo pipefail
+
+ALLOW="serve.py index.html retro-tag.py roots.example.json tags.example.txt README.md LICENSE .gitignore .githooks/pre-commit .githooks/pre-push docs/demo-setup.png docs/demo-light.png docs/demo-dark.png"
+
+fail=0
+while IFS= read -r f; do
+  ok=0
+  for a in $ALLOW; do
+    if [ "$f" = "$a" ]; then ok=1; break; fi
+  done
+  if [ "$ok" -eq 0 ]; then
+    echo "pre-commit: '$f' is not on the tracked allowlist" >&2
+    fail=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+home_pat='/Use''rs/'
+entry_pat='^\+### (E|CE|C|M)[0-9]'
+if git diff --cached --diff-filter=ACMR --unified=0 | grep -E '^\+' | grep -Eq "$home_pat|$entry_pat"; then
+  echo "pre-commit: staged content matches a home-path or register-entry pattern" >&2
+  fail=1
+fi
+
+exit "$fail"

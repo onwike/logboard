@@ -1,0 +1,8 @@
+# logboard tag canon — one tag per line, three tab-separated columns:
+#   name<TAB>applies-to<TAB>definition
+# applies-to is a comma list of register prefixes (E,CE,C,M) the tag may be used in.
+# A '#' comment line directly above a tag records why it exists separately from a
+# near-duplicate in another register (the merge/split justification).
+network	E,CE	Failures in HTTP calls, DNS, sockets, or remote endpoints
+datetime	CE,M	Timezone, parsing, or clock-comparison defects
+shell-quoting	E	Metacharacter or quoting corruption in shell commands

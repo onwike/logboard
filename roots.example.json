@@ -1,0 +1,12 @@
+{
+  "global_logs": {
+    "tool_error": "~/logs/ToolErrorLog.md",
+    "coding_error": "~/logs/CodingErrorLog.md"
+  },
+  "project_roots": [
+    "~/projects/project-a",
+    "~/projects/project-b"
+  ],
+  "tags_file": "~/logs/tags.txt",
+  "allowed_origins": []
+}

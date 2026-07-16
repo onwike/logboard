@@ -1,0 +1,5 @@
+roots.json
+golden.local.json
+assignments.json
+*.log
+.DS_Store
