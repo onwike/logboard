@@ -11,6 +11,22 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v1.01.03 — chart axis labels + table pagination (2026-07-16)
+
+**Shipped:** every chart now carries x and y axis labels — the trend and tagging-debt
+time-series get day/week (x) and entries (y) titles; the horizontal lane, project, tag,
+and tool/area charts get a category + "entries →" + total axis caption. The entries
+table is paginated inside a scrolling frame (sticky header) with a rows-per-page toggle
+(25 / 50 / 100 / All, default 50), prev/next controls, and a page indicator; `#id` deep
+links jump to the page containing the entry and expand it.
+
+**Quality level:** untiered (frontend-only refinement). Gates: backend unchanged
+(`test_logboard.py` 31/31, `serve.py --check` 31/0); browser-verified in light and dark —
+axis labels present on all charts, pager navigation / size toggle / deep-link jump all
+exercised, console clean.
+
+**Carried forward:** none.
+
 ## v1.01.02 — live README captures + Bronze certification (2026-07-16)
 
 **Shipped:** README refreshed with light/dark captures of the live dashboard, all

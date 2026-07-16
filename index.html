@@ -57,6 +57,12 @@ header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
 .brow{display:flex;align-items:center;gap:8px;margin:6px 0}
 .blab{width:132px;flex:none;font-size:12px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btot{width:36px;flex:none;text-align:right;font-size:12px;color:var(--ink2)}
+.axiscap{display:flex;align-items:center;gap:8px;margin-top:6px;padding-top:5px;border-top:1px solid var(--grid);color:var(--muted);font-size:11px}
+.pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ink2)}
+.pager button{padding:3px 10px}
+.pager button:disabled{opacity:.4;cursor:default}
+#tblframe{max-height:620px;overflow:auto}
+#tblframe thead th{position:sticky;top:0;background:var(--surface);z-index:1}
 .seg{display:flex;gap:2px;min-width:0}
 .hbar{height:13px;border-radius:3px;min-width:2px}
 table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
@@ -180,11 +186,26 @@ a{color:var(--ink2)}
     <h2>All entries</h2>
     <span class="muted num" id="tblCount"></span>
   </div>
-  <table>
-    <colgroup><col style="width:72px"><col><col style="width:150px"><col style="width:104px"><col style="width:118px"><col style="width:78px"></colgroup>
-    <thead><tr><th>ID</th><th>Summary</th><th>Tags</th><th>Lane</th><th>Project</th><th>Date</th></tr></thead>
-    <tbody id="tbody"></tbody>
-  </table>
+  <div id="tblframe">
+    <table>
+      <colgroup><col style="width:72px"><col><col style="width:150px"><col style="width:104px"><col style="width:118px"><col style="width:78px"></colgroup>
+      <thead><tr><th>ID</th><th>Summary</th><th>Tags</th><th>Lane</th><th>Project</th><th>Date</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <label>Rows per page
+      <select id="pageSize">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="0">All</option>
+      </select>
+    </label>
+    <button id="pagePrev">‹ Prev</button>
+    <span id="pageInfo" class="num"></span>
+    <button id="pageNext">Next ›</button>
+  </div>
 </section>
 
 </main>
@@ -207,7 +228,8 @@ var TYPES=[
 var TYPE={}; TYPES.forEach(function(t){TYPE[t.k]=t;});
 
 var DATA=null;
-var state={type:'',tags:{},untagged:false,lane:'',project:'',range:0,q:''};
+var state={type:'',tags:{},untagged:false,lane:'',project:'',range:0,q:'',page:0,pageSize:50};
+var pendingJump=null;
 var expanded={};
 var endpoint=localStorage.getItem('lb-endpoint')||'';
 
@@ -369,14 +391,14 @@ function syncTagBtn(){
 }
 
 /* ---------- svg chart helpers ---------- */
-function stackedSvg(buckets,series,H){
-  var W=980,padL=34,padB=18,padT=6;H=H||190;
+function stackedSvg(buckets,series,H,xlabel,ylabel){
+  var W=980,padL=52,padB=36,padT=6;H=(H||190)+22;
   var innerW=W-padL-6,innerH=H-padT-padB;
   var max=1;
   buckets.forEach(function(b){var s=0;series.forEach(function(sr){s+=b.values[sr.k]||0});if(s>max)max=s});
   var step=innerW/buckets.length;
   var bw=Math.max(2,Math.min(22,step-2));
-  var h='<svg role="img" aria-label="Stacked bar chart" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" shape-rendering="crispEdges">';
+  var h='<svg role="img" aria-label="Stacked bar chart of '+esc(ylabel||'value')+' by '+esc(xlabel||'category')+'" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" shape-rendering="crispEdges">';
   var ticks=Math.max(1,Math.min(4,max));
   for(var i=0;i<=ticks;i++){
     var v=Math.round(max*i/ticks),y=padT+innerH-innerH*i/ticks;
@@ -391,10 +413,12 @@ function stackedSvg(buckets,series,H){
       var bh=innerH*v/max;y-=bh;total+=v;
       h+='<rect x="'+x.toFixed(1)+'" y="'+(y+1).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,bh-1).toFixed(1)+'" rx="1.5" fill="'+sr.color+'"/>';
     });
-    if(i%lblEvery===0)h+='<text x="'+(padL+i*step+step/2)+'" y="'+(H-4)+'" text-anchor="middle">'+esc(b.label)+'</text>';
+    if(i%lblEvery===0)h+='<text x="'+(padL+i*step+step/2)+'" y="'+(padT+innerH+13)+'" text-anchor="middle">'+esc(b.label)+'</text>';
     h+='<rect x="'+(padL+i*step)+'" y="'+padT+'" width="'+step.toFixed(1)+'" height="'+innerH+'" fill="transparent" data-i="'+i+'"/>';
   });
   h+='<line x1="'+padL+'" y1="'+(padT+innerH)+'" x2="'+W+'" y2="'+(padT+innerH)+'" stroke="var(--axis)" stroke-width="1"/>';
+  if(ylabel)h+='<text x="'+(14)+'" y="'+(padT+innerH/2)+'" text-anchor="middle" transform="rotate(-90 14 '+(padT+innerH/2)+')" fill="var(--text-secondary)">'+esc(ylabel)+'</text>';
+  if(xlabel)h+='<text x="'+(padL+innerW/2)+'" y="'+(H-3)+'" text-anchor="middle" fill="var(--text-secondary)">'+esc(xlabel)+'</text>';
   h+='</svg>';
   return h;
 }
@@ -501,7 +525,7 @@ function renderTrend(filtered){
   $('#trendTitle').textContent='Entries per '+(mk.weekly?'week':'day');
   legend.innerHTML=series.map(function(s){return '<span><span class="dot" style="background:'+s.color+'"></span>'+esc(s.label)+'</span>'}).join('');
   if(!mk.buckets.length){box.innerHTML='<div class="empty">No dated entries in this view.</div>';note.textContent='';return}
-  box.innerHTML=stackedSvg(mk.buckets,series);
+  box.innerHTML=stackedSvg(mk.buckets,series,null,mk.weekly?'week':'day','entries');
   attachTooltip(box,mk.buckets,series);
   var notes=[];
   if(emphasis)notes.push('Emphasis view: colored = entries matching the tag filter, gray = everything else in view.');
@@ -514,7 +538,7 @@ function renderTrend(filtered){
   note.textContent=notes.join(' ');
 }
 
-function hbarRows(el,rows,maxW){
+function hbarRows(el,rows,maxW,ylabel){
   if(!rows.length){el.innerHTML='<div class="empty">Nothing in this view.</div>';return}
   var mx=1;rows.forEach(function(r){if(r.total>mx)mx=r.total});
   var h='';
@@ -526,6 +550,8 @@ function hbarRows(el,rows,maxW){
     });
     h+='</span><span style="flex:1"></span><span class="btot num">'+r.total+'</span></div>';
   });
+  h+='<div class="axiscap"><span class="blab">'+esc(ylabel||'category')+'</span>'+
+     '<span style="flex:1;text-align:center">entries →</span><span class="btot">total</span></div>';
   el.innerHTML=h;
 }
 function renderLanes(filtered){
@@ -538,7 +564,7 @@ function renderLanes(filtered){
     var total=0;var parts=TYPES.map(function(t){var v=m[k][t.k]||0;total+=v;return {v:v,color:t.color,label:t.label}});
     return {label:k,total:total,parts:parts};
   }).sort(function(a,b){return b.total-a.total});
-  hbarRows($('#lanes'),rows);
+  hbarRows($('#lanes'),rows,null,'lane');
 }
 function renderProjects(filtered){
   var m={};
@@ -551,14 +577,14 @@ function renderProjects(filtered){
     var total=0;var parts=TYPES.map(function(t){var v=m[k][t.k]||0;total+=v;return {v:v,color:t.color,label:t.label}});
     return {label:k,total:total,parts:parts};
   }).sort(function(a,b){return b.total-a.total});
-  hbarRows($('#projects'),rows);
+  hbarRows($('#projects'),rows,null,'project');
 }
 function renderTopTags(filtered){
   var m={};filtered.forEach(function(e){e.tags.forEach(function(t){m[t]=(m[t]||0)+1})});
   var rows=Object.keys(m).sort(function(a,b){return m[b]-m[a]}).slice(0,8)
     .map(function(t){return {label:t,total:m[t],parts:[{v:m[t],color:'var(--seq)',label:t}]}});
   if(!rows.length){$('#topTags').innerHTML='<div class="empty">No tags yet — phase T1 populates the canon, then entries get tagged.</div>';return}
-  hbarRows($('#topTags'),rows);
+  hbarRows($('#topTags'),rows,null,'tag');
 }
 function renderTopCats(filtered){
   var m={};
@@ -569,7 +595,7 @@ function renderTopCats(filtered){
   });
   var rows=Object.keys(m).sort(function(a,b){return m[b]-m[a]}).slice(0,8)
     .map(function(t){return {label:t,total:m[t],parts:[{v:m[t],color:'var(--seq)',label:t}]}});
-  hbarRows($('#topCats'),rows);
+  hbarRows($('#topCats'),rows,null,'tool / area');
 }
 function renderRepeat(filtered){
   var rows=filtered.filter(function(e){return e.count>1}).sort(function(a,b){return b.count-a.count});
@@ -590,7 +616,7 @@ function renderDebt(){
   var dom=domainFor(pool,'date_logged');
   var mk=makeBuckets(pool.filter(function(e){return e.date_logged}),'date_logged',dom.from,dom.to);
   var series=[{k:'__debt',label:'Untagged',color:'var(--debt)'}];
-  $('#debt').innerHTML=stackedSvg(mk.buckets,series,130);
+  $('#debt').innerHTML=stackedSvg(mk.buckets,series,130,mk.weekly?'week':'day','untagged entries');
   attachTooltip($('#debt'),mk.buckets,series,function(){
     state.untagged=true;buildTagMenu();renderAll();
     $('#tbody').scrollIntoView({behavior:'smooth'});
@@ -646,8 +672,26 @@ function renderTable(filtered){
     return a.uid<b.uid?1:-1;
   });
   $('#tblCount').textContent=rows.length+' of '+DATA.entry_count+' entries';
+  var size=state.pageSize;
+  if(pendingJump){
+    var ji=rows.map(function(e){return e.uid}).indexOf(pendingJump);
+    if(ji>=0&&size>0)state.page=Math.floor(ji/size);
+    pendingJump=null;
+  }
+  var pageCount=size>0?Math.max(1,Math.ceil(rows.length/size)):1;
+  if(state.page>=pageCount)state.page=pageCount-1;
+  if(state.page<0)state.page=0;
+  var start=size>0?state.page*size:0;
+  var pageRows=size>0?rows.slice(start,start+size):rows;
+  if(rows.length){
+    $('#pageInfo').textContent=size>0
+      ? ('page '+(state.page+1)+' of '+pageCount+' · '+(start+1)+'–'+(start+pageRows.length))
+      : ('all '+rows.length);
+  }else{$('#pageInfo').textContent='';}
+  $('#pagePrev').disabled=size===0||state.page<=0;
+  $('#pageNext').disabled=size===0||state.page>=pageCount-1;
   var h='';
-  rows.forEach(function(e){
+  pageRows.forEach(function(e){
     var open=!!expanded[e.uid];
     var pills=e.tags.slice(0,3).map(function(t){return '<span class="pill">'+esc(t)+'</span>'}).join('')+
       (e.tags.length>3?'<span class="pill">+'+(e.tags.length-3)+'</span>':'')+
@@ -697,8 +741,9 @@ function renderHeader(){
   b.textContent=un+' untagged';
   b.className=un?'warn':'';
 }
-function renderAll(){
+function renderAll(preservePage){
   if(!DATA||!DATA.configured)return;
+  if(!preservePage&&!pendingJump)state.page=0;
   var filtered=DATA.entries.filter(pass);
   $('#count').textContent=filtered.length+' of '+DATA.entry_count+' shown';
   renderHeader();renderWarnings();renderKpis(filtered);renderTrend(filtered);
@@ -719,7 +764,8 @@ function applyHash(){
   var matches=DATA.entries.filter(function(e){return e.id===hash});
   if(matches.length){
     matches.forEach(function(e){expanded[e.uid]=1});
-    renderAll();
+    pendingJump=matches[0].uid;
+    renderAll(true);
     var el=$('#row-'+matches[0].uid.replace(/[^a-zA-Z0-9_-]/g,'_'));
     if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
   }
@@ -740,6 +786,9 @@ $('#laneSel').addEventListener('change',function(){state.lane=this.value;renderA
 $('#projSel').addEventListener('change',function(){state.project=this.value;renderAll()});
 $('#rangeSel').addEventListener('change',function(){state.range=+this.value;renderAll()});
 $('#q').addEventListener('input',function(){state.q=this.value.trim().toLowerCase();renderAll()});
+$('#pageSize').addEventListener('change',function(){state.pageSize=+this.value;state.page=0;renderAll(true)});
+$('#pagePrev').addEventListener('click',function(){if(state.page>0){state.page--;renderAll(true);$('#tblframe').scrollTop=0}});
+$('#pageNext').addEventListener('click',function(){state.page++;renderAll(true);$('#tblframe').scrollTop=0});
 $('#refresh').addEventListener('click',load);
 $('#gear').addEventListener('click',function(){openSetup(false)});
 $('#addRoot').addEventListener('click',function(){$('#cfgRoots').appendChild(rootRow(''))});
