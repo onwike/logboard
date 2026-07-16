@@ -272,9 +272,22 @@ def collect(cfg):
             meta["warnings"] = ["configured but missing"]
         files.append(meta)
 
+    seen_projects = {}
     for root in (cfg or {}).get("project_roots") or []:
         xr = expand(root)
         project = os.path.basename(xr.rstrip("/")) or xr
+        # A hand-edited roots.json bypasses validate_config; guard here too so a
+        # duplicate basename can never silently route a tag edit to the wrong file.
+        if project in seen_projects and seen_projects[project] != xr:
+            for lt, fname in (("correction", "corrections.md"),
+                              ("miscalculation", "miscalculations.md")):
+                m = file_meta(os.path.join(xr, fname), os.path.join(xr, fname), lt, project)
+                m["warnings"] = ["duplicate project name %r collides with %s — skipped to avoid misrouted edits"
+                                 % (project, seen_projects[project])]
+                m["present"] = False
+                files.append(m)
+            continue
+        seen_projects[project] = xr
         for lt, fname in (("correction", "corrections.md"),
                           ("miscalculation", "miscalculations.md")):
             fp = os.path.join(xr, fname)
@@ -530,6 +543,7 @@ class Handler(BaseHTTPRequestHandler):
             host = h.split("]", 1)[0] + "]"
         else:
             host = h.split(":", 1)[0]
+        host = host.lower()  # hostnames are case-insensitive (RFC 3986)
         if host in ("127.0.0.1", "localhost", "[::1]"):
             return True
         cfg = load_config() or {}

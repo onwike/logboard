@@ -20,7 +20,9 @@ jobs:
           for c in $(git rev-list --all); do
             case " $EXEMPT " in *" $c "*) continue;; esac
             while IFS= read -r f; do
-              if git show "$c:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
+              # grep consumes all input (no -q): a -q early-exit under pipefail
+              # sends SIGPIPE upstream and the 141 reads as clean on big files.
+              if git show "$c:$f" | grep -I -E "$home_pat|$entry_pat" >/dev/null; then
                 echo "leak: '$f' @ $c matches a forbidden pattern"
                 exit 1
               fi
