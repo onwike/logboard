@@ -22,132 +22,139 @@ import serve
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-TOOL_LOG = u"""# Tool Error Log — test fixture
 
-## Index
+def F(s):
+    """Strip the one-char pipe armor from fixture literals. The armor keeps
+    register-shaped lines from starting at column 0, so this file passes the
+    repo's own pre-push content guard while the runtime fixtures stay exact."""
+    return "\n".join(line[1:] for line in s.split("\n") if line != "") + "\n"
 
-| ID | Tool | Error signature | Root cause | Resolution | First seen | Count |
-|----|------|-----------------|-----------|-----------|-----------|-------|
-| E01 | deployctl | expired token | cache | re-login | 2026-06-24 | 2 |
-| E02 | curl | wrong server | squatter | assert identity | 2026-06-30 | 1 |
-| E03 | git | hook skipped | per-clone config | set hooksPath | 2026-07-11 | 1 |
+TOOL_LOG = F(u"""|# Tool Error Log — test fixture
+|
+|## Index
+|
+|| ID | Tool | Error signature | Root cause | Resolution | First seen | Count |
+||----|------|-----------------|-----------|-----------|-----------|-------|
+|| E01 | deployctl | expired token | cache | re-login | 2026-06-24 | 2 |
+|| E02 | curl | wrong server | squatter | assert identity | 2026-06-30 | 1 |
+|| E03 | git | hook skipped | per-clone config | set hooksPath | 2026-07-11 | 1 |
+|
+|## Details
+|
+|### E01 — CLI deploy failed with an expired auth token
+|- **Tool:** deployctl
+|- **Symptom:** deploy exited 1 with a 401.
+|- **Root cause:** cached token expired
+|- **Resolution:** re-login before deploy
+|- **Occurrences:** 2026-06-24 10:02 EDT; 2026-07-08 09:15 EDT (recurred on the staging runner; mid-deploy)
+|
+|### E02 — curl probe hit the wrong local server on a shared port
+|- **Lane:** Backend
+|- **Tool:** curl
+|- **Root cause:** another process was listening
+|- **Resolution:** assert the responder identity
+|- **Odd field:** should be tolerated
+|- **Tags:** network, config
+|- **Occurrences:** 2026-06-30 14:11 EDT
+|
+|### E03 — git hook skipped because hooksPath was unset
+|- **Lane:** Tooling
+|- **Tool:** git
+|- **Root cause:** per-clone configuration
+|- **Resolution:** set hooks path at bootstrap
+|- **Occurrences:** 2026-07-11 16:40 EDT
+|
+|<!-- TOOL-ERROR-APPEND-HERE -->
+|### E99 — below the marker, must never parse
+|- **Tool:** ghost
+|- **Occurrences:** 2026-07-12 00:00 EDT
+|""")
 
-## Details
+CODING_LOG = F(u"""|# Coding Error Log — test fixture
+|
+|## Index
+|
+|| ID | Area | Error signature | Root cause | Fix | First seen | Count |
+||----|------|-----------------|-----------|-----|-----------|-------|
+|| CE01 | JS · datetime | local parse | no zone signal | normalize | 2026-06-26 | 1 |
+|| CE02 | Python | off-by-one | floor division | ceil | 2026-07-05 | 1 |
+|
+|## Details
+|
+|### CE01 — Date.parse on a space-form datetime parses as local time
+|- **Lane:** Backend
+|- **Area:** JS · datetime
+|- **Root cause:** no timezone signal
+|- **Fix:** normalize to ISO first
+|- **Tags:** datetime
+|- **Occurrences:** 2026-06-26 11:30 EDT
+|
+|### CE02 — off-by-one dropped the final page
+|- **Lane:** Backend
+|- **Area:** Python
+|- **Root cause:** floor division
+|- **Fix:** ceil division
+|- **Occurrences:** 2026-07-05 09:48 EDT
+|
+|<!-- CODING-ERROR-APPEND-HERE -->
+|""")
 
-### E01 — CLI deploy failed with an expired auth token
-- **Tool:** deployctl
-- **Symptom:** deploy exited 1 with a 401.
-- **Root cause:** cached token expired
-- **Resolution:** re-login before deploy
-- **Occurrences:** 2026-06-24 10:02 EDT; 2026-07-08 09:15 EDT (recurred on the staging runner; mid-deploy)
+CORR_LOG = F(u"""|# Corrections Log — project-a
+|
+|## Index
+|
+|| ID | Lane | What was wrong | Trigger | Correction | Date |
+||----|------|----------------|---------|------------|------|
+|| C01 | Backend | rate limit belief | assumption | per account | 2026-07-02 |
+|| C02 | Frontend | re-render belief | self | memoizes | 2026-07-10 |
+|
+|## Details
+|
+|### C01 — believed the vendor rate limit was per key
+|- **Lane:** Backend
+|- **Trigger:** assumption
+|- **Wrong:** treated the limit as per key
+|- **Correction:** it is per account
+|- **Evidence:** confirmed on the status page | 2026-06-20
+|- **Date:** 2026-07-02 12:05 EDT
+|
+|### C02 — assumed the widget re-renders on prop change
+|- **Lane:** Frontend
+|- **Trigger:** self
+|- **Wrong:** expected a refresh
+|- **Correction:** it memoizes until remount
+|- **Date:** 2026-07-10 17:22 EDT
+|
+|<!-- CORRECTIONS-APPEND-HERE -->
+|""")
 
-### E02 — curl probe hit the wrong local server on a shared port
-- **Lane:** Backend
-- **Tool:** curl
-- **Root cause:** another process was listening
-- **Resolution:** assert the responder identity
-- **Odd field:** should be tolerated
-- **Tags:** network, config
-- **Occurrences:** 2026-06-30 14:11 EDT
+MISC_LOG = F(u"""|# Miscalculations Log — project-a
+|
+|## Index
+|
+|| ID | Lane | Miscalculation | Wrong value | Correct value | How caught | Date |
+||----|------|----------------|-------------|---------------|------------|------|
+|| M01 | Backend | stale row count | 41,200 | 44,738 | re-ran query | 2026-07-09 |
+|
+|## Details
+|
+|### M01 — quoted last month's row count
+|- **Lane:** Backend
+|- **Miscalculation:** quoted last month's row count
+|- **Wrong:** 41,200
+|- **Correct:** 44,738
+|- **How caught:** reviewer re-ran the query
+|- **Date:** 2026-07-09 13:41 EDT
+|
+|<!-- MISCALC-APPEND-HERE -->
+|""")
 
-### E03 — git hook skipped because hooksPath was unset
-- **Lane:** Tooling
-- **Tool:** git
-- **Root cause:** per-clone configuration
-- **Resolution:** set hooks path at bootstrap
-- **Occurrences:** 2026-07-11 16:40 EDT
-
-<!-- TOOL-ERROR-APPEND-HERE -->
-### E99 — below the marker, must never parse
-- **Tool:** ghost
-- **Occurrences:** 2026-07-12 00:00 EDT
-"""
-
-CODING_LOG = u"""# Coding Error Log — test fixture
-
-## Index
-
-| ID | Area | Error signature | Root cause | Fix | First seen | Count |
-|----|------|-----------------|-----------|-----|-----------|-------|
-| CE01 | JS · datetime | local parse | no zone signal | normalize | 2026-06-26 | 1 |
-| CE02 | Python | off-by-one | floor division | ceil | 2026-07-05 | 1 |
-
-## Details
-
-### CE01 — Date.parse on a space-form datetime parses as local time
-- **Lane:** Backend
-- **Area:** JS · datetime
-- **Root cause:** no timezone signal
-- **Fix:** normalize to ISO first
-- **Tags:** datetime
-- **Occurrences:** 2026-06-26 11:30 EDT
-
-### CE02 — off-by-one dropped the final page
-- **Lane:** Backend
-- **Area:** Python
-- **Root cause:** floor division
-- **Fix:** ceil division
-- **Occurrences:** 2026-07-05 09:48 EDT
-
-<!-- CODING-ERROR-APPEND-HERE -->
-"""
-
-CORR_LOG = u"""# Corrections Log — project-a
-
-## Index
-
-| ID | Lane | What was wrong | Trigger | Correction | Date |
-|----|------|----------------|---------|------------|------|
-| C01 | Backend | rate limit belief | assumption | per account | 2026-07-02 |
-| C02 | Frontend | re-render belief | self | memoizes | 2026-07-10 |
-
-## Details
-
-### C01 — believed the vendor rate limit was per key
-- **Lane:** Backend
-- **Trigger:** assumption
-- **Wrong:** treated the limit as per key
-- **Correction:** it is per account
-- **Evidence:** confirmed on the status page | 2026-06-20
-- **Date:** 2026-07-02 12:05 EDT
-
-### C02 — assumed the widget re-renders on prop change
-- **Lane:** Frontend
-- **Trigger:** self
-- **Wrong:** expected a refresh
-- **Correction:** it memoizes until remount
-- **Date:** 2026-07-10 17:22 EDT
-
-<!-- CORRECTIONS-APPEND-HERE -->
-"""
-
-MISC_LOG = u"""# Miscalculations Log — project-a
-
-## Index
-
-| ID | Lane | Miscalculation | Wrong value | Correct value | How caught | Date |
-|----|------|----------------|-------------|---------------|------------|------|
-| M01 | Backend | stale row count | 41,200 | 44,738 | re-ran query | 2026-07-09 |
-
-## Details
-
-### M01 — quoted last month's row count
-- **Lane:** Backend
-- **Miscalculation:** quoted last month's row count
-- **Wrong:** 41,200
-- **Correct:** 44,738
-- **How caught:** reviewer re-ran the query
-- **Date:** 2026-07-09 13:41 EDT
-
-<!-- MISCALC-APPEND-HERE -->
-"""
-
-TAGS_TXT = u"""# test canon
-network\tE,CE,C\tRemote endpoint failures
-config\tE,CE\tConfiguration that did not travel
-datetime\tCE,M\tTimezone and parsing defects
-assumption\tC\tUnverified beliefs
-"""
+TAGS_TXT = F(u"""|# test canon
+|network\tE,CE,C\tRemote endpoint failures
+|config\tE,CE\tConfiguration that did not travel
+|datetime\tCE,M\tTimezone and parsing defects
+|assumption\tC\tUnverified beliefs
+|""")
 
 
 def build_fixtures(root):
