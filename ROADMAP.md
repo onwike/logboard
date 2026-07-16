@@ -11,6 +11,18 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v1.01.01 — test suite + write-guard hardening (2026-07-16)
+
+**Shipped:** 28 stdlib unittest tests over synthetic fixtures (parser incl. legacy
+quirks and bare-semicolon counts, canon, config validation, `edit_tags` invariants,
+HTTP layer with origin/CORS gating, CLI exit codes); fix for marker-blind entry
+counting in the write guard (CE36), caught by the suite's first run.
+
+**Quality level:** untiered. Gates at tag time: `test_logboard.py` 28/28 OK;
+`serve.py --check` 31 ok / 0 failed on live registers; repo hygiene clean.
+
+**Carried forward:** none.
+
 ## v1.01.00 — admin tag editing + retro-tagger (2026-07-16)
 
 **Shipped:** `POST /tags` — the server's one surgical register write (a single entry's
@@ -40,8 +52,9 @@ tree equals the tracked allowlist; content greps clean; seeded leak test blocked
 
 ## Planned
 
-- **v1.01.01** — test suite covering parser, config API, tag editing, guards (patch).
 - **v1.01.02** — README refreshed with captures of the live system, content redacted;
-  Bronze certification of the shipped state recorded on this tag.
+  Bronze-certification fix wave (Host-header anti-rebinding gate, range-scanning
+  pre-push, CI leak-guard workflow, doc corrections); Bronze certification verdict
+  recorded on this tag.
 - **Part 2 (unversioned until planned)** — cloud-hosted frontend pointing at the local
   data server; CORS/PNA enablers already shipped in v1.00.00.

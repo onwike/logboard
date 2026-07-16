@@ -1,0 +1,29 @@
+name: leak-guard
+
+on: [push, pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan full history for forbidden patterns
+        run: |
+          set -euo pipefail
+          home_pat='/Use''rs/'
+          entry_pat='^### (E|CE|C|M)[0-9]'
+          # Content-addressed exemption: pipe-unarmored but fully SYNTHETIC test
+          # fixtures, armored in the immediately following commit. Only this SHA.
+          EXEMPT="6dc0b30ff171194f71f73f968e2dc450b41894e4"
+          for c in $(git rev-list --all); do
+            case " $EXEMPT " in *" $c "*) continue;; esac
+            while IFS= read -r f; do
+              if git show "$c:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
+                echo "leak: '$f' @ $c matches a forbidden pattern"
+                exit 1
+              fi
+            done < <(git ls-tree -r --name-only "$c")
+          done
+          echo "history clean"

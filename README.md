@@ -55,7 +55,7 @@ Four register types, one grammar:
 | Tool errors | E | global | Tool | Resolution | Occurrences |
 | Coding errors | CE | global | Area | Fix | Occurrences |
 | Corrections | C | per project (`corrections.md`) | Trigger | Correction | Date |
-| Miscalculations | M | per project (`miscalculations.md`) | Wrong / Correct | Correct | Date |
+| Miscalculations | M | per project (`miscalculations.md`) | How caught | Correct | Date |
 
 Semantics worth knowing:
 
@@ -63,7 +63,7 @@ Semantics worth knowing:
 - Corrections and miscalculations carry the date they were logged (`Date`) and, optionally, the date the event actually happened — a trailing `| YYYY-MM-DD` at the end of the Evidence line. Charts prefer the event date.
 - `Tags` is optional. Entries without it show up as tagging debt, not errors.
 - An `## Index` table at the top of each file is treated as a derived view; only the Details blocks are parsed.
-- Entries end at an HTML append-marker comment (see the example configs) or end of file.
+- Entries end at an HTML append-marker comment — a line like `<!-- TOOL-ERROR-APPEND-HERE -->` (any `…-APPEND-HERE` comment works) — or end of file. Anything below the marker is ignored.
 
 ## Tags
 
@@ -82,10 +82,10 @@ Semantics worth knowing:
 
 The frontend is one static file. Host `index.html` anywhere, open its settings panel and point the data-endpoint field at your local server, and add the page's origin to `allowed_origins` in `roots.json`. serve.py answers CORS and private-network preflights only for origins you list (default: none). The data itself still never leaves your machine.
 
-## Privacy by construction
+## Privacy posture
 
-- The server binds 127.0.0.1. It writes its own `roots.json`, its `tag-edits.log` journal, and — only through the tag editor — the single `Tags` line of one register entry at a time: lock-guarded, written atomically, re-parsed after every write with automatic restore on any anomaly, and journaled. Nothing else in a register is ever touched. Tag edits are refused for cross-site origins even when `allowed_origins` grants read access, and only canon tags can be added.
-- This repo ships pre-commit and pre-push guards that refuse any path outside the tracked allowlist and any content that looks like a home-directory path or a real register entry. Enable them per clone: `git config core.hooksPath .githooks`
-- The dashboard screenshots are captures of a live system with all register text (summaries, causes, notices) blurred before publishing; the setup screenshot uses synthetic demo data. Numbers, charts, tags, and lane/project labels are shown as-is.
+- The server binds 127.0.0.1 and rejects requests whose `Host` header doesn't name this machine (anti-DNS-rebinding; add a tunnel hostname to `allowed_hosts` in `roots.json` if you ever front it deliberately). It writes its own `roots.json`, its `tag-edits.log` journal, and — only through the tag editor — the single `Tags` line of one register entry at a time: lock-guarded, written atomically, re-parsed after every write with automatic restore on any anomaly, and journaled (each edited register also gains a persistent `.lock` sibling and a transient `.logboard-tmp` during the write). Nothing else in a register is ever touched. Tag edits are refused for cross-site origins even when `allowed_origins` grants read access, and only canon tags can be added.
+- This repo ships layered leak guards: pre-commit and pre-push hooks that refuse any path outside the tracked allowlist and any content matching a home-directory path or a register entry heading (**opt-in per clone**: `git config core.hooksPath .githooks`), plus a CI workflow that re-scans the full pushed history server-side. The patterns catch structure, not arbitrary prose — treat them as a net, not a proof.
+- The dashboard screenshots are captures of a live system with all register text (summaries, causes, notices) blurred before publishing — a manual pre-publish step, reviewed by eye; the setup screenshot uses synthetic demo data. Numbers, charts, tags, and lane/project labels are shown as-is.
 
 MIT license.

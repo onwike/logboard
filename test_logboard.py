@@ -321,6 +321,13 @@ class ConfigValidationTests(TempConfigMixin, unittest.TestCase):
         errors, _ = serve.validate_config({"global_logs": {}, "project_roots": []})
         self.assertTrue(any("at least one register" in e for e in errors))
 
+    def test_duplicate_basename_rejected(self):
+        r2 = os.path.join(self.tmp, "elsewhere", "project-a")
+        os.makedirs(r2)
+        cfg = dict(self.cfg, project_roots=[self.cfg["project_roots"][0], r2])
+        errors, _ = serve.validate_config(cfg)
+        self.assertTrue(any("duplicate project name" in e for e in errors))
+
     def test_find_register_file(self):
         path, lt = serve.find_register_file(self.cfg, "global:E02")
         self.assertEqual((path, lt), (self.paths["tool"], "tool_error"))
@@ -437,6 +444,16 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
         self.assertEqual(by_uid["global:E01"]["count"], 3)
         self.assertEqual(by_uid["project-a:C01"]["date_event"], "2026-06-20")
         self.assertEqual(len(d["tag_canon"]), 4)
+
+    def test_host_header_rejected(self):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.putrequest("GET", "/data.json", skip_host=True)
+        conn.putheader("Host", "evil.example")
+        conn.endheaders()
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 403)
+        conn.close()
 
     def test_unknown_path_404(self):
         status, _, _ = self.req("/nope")
