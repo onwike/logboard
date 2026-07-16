@@ -30,6 +30,7 @@ Dark mode follows your system:
 - Hot-spots: top tags, top tools and areas, and repeat offenders (signatures with more than one occurrence)
 - Tagging debt: an untagged entry is an open defect, tracked in its own chart until it decays to zero
 - A searchable, filterable table of every entry with full drill-down — deep-linkable by id (`#E13`) or tag (`#tag=network`)
+- Tag editing in the drill-down: remove a tag with its ×, add one from the canon-filtered picker — edits land in the register file itself (see the privacy notes for the guardrails)
 
 Everything re-parses on every request, so the page is always current — edit a register, refresh the page.
 
@@ -83,7 +84,7 @@ The frontend is one static file. Host `index.html` anywhere, open its settings p
 
 ## Privacy by construction
 
-- The server binds 127.0.0.1 and writes exactly one file, ever: its own `roots.json`. Registers are never opened for writing.
+- The server binds 127.0.0.1. It writes its own `roots.json`, its `tag-edits.log` journal, and — only through the tag editor — the single `Tags` line of one register entry at a time: lock-guarded, written atomically, re-parsed after every write with automatic restore on any anomaly, and journaled. Nothing else in a register is ever touched. Tag edits are refused for cross-site origins even when `allowed_origins` grants read access, and only canon tags can be added.
 - This repo ships pre-commit and pre-push guards that refuse any path outside the tracked allowlist and any content that looks like a home-directory path or a real register entry. Enable them per clone: `git config core.hooksPath .githooks`
 - The screenshots above are synthetic demo data.
 
