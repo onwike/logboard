@@ -3,8 +3,11 @@
 
 Serves a single-page dashboard and a JSON API on 127.0.0.1 only. The
 registers are re-parsed on every request, so the page is always fresh.
-The only file this server ever writes is its own roots.json (from the
-browser setup screen); register files are never opened for writing.
+Writes are confined to: roots.json (the browser setup screen), the
+tag-edits.log journal, and — only through the guarded tag editor — the
+single Tags line of one register entry at a time (plus its .lock and
+transient .logboard-tmp siblings). Nothing else in a register is ever
+touched.
 
 Usage:
   python3 serve.py            start the server (port 8799, or $LOGBOARD_PORT)
@@ -55,7 +58,8 @@ FIELD_MAPS = {
                        "Tags": "tags_raw"},
 }
 
-ALLOWED_KEYS = {"global_logs", "project_roots", "tags_file", "allowed_origins"}
+ALLOWED_KEYS = {"global_logs", "project_roots", "tags_file", "allowed_origins",
+                "allowed_hosts"}
 
 
 def expand(p):
@@ -366,6 +370,17 @@ def validate_config(cfg):
     ao = cfg.get("allowed_origins") if cfg.get("allowed_origins") is not None else []
     if not isinstance(ao, list) or any(not isinstance(o, str) for o in ao):
         errors.append("allowed_origins must be a list of origin strings")
+    ah = cfg.get("allowed_hosts") if cfg.get("allowed_hosts") is not None else []
+    if not isinstance(ah, list) or any(not isinstance(h, str) for h in ah):
+        errors.append("allowed_hosts must be a list of host names")
+
+    names = {}
+    for r in roots:
+        b = os.path.basename(expand(r).rstrip("/"))
+        if b in names:
+            errors.append("duplicate project name %r (%s and %s) — tag edits could target the wrong file"
+                          % (b, names[b], r))
+        names[b] = r
 
     if not any(gl.get(lt) for lt in ("tool_error", "coding_error")) and not roots:
         errors.append("configure at least one register (a global log or a project root)")
@@ -507,6 +522,19 @@ class Handler(BaseHTTPRequestHandler):
         allowed = cfg.get("allowed_origins") or []
         return origin if origin in allowed else None
 
+    def _host_ok(self):
+        """Anti-DNS-rebinding: the Host header must name this machine (or an
+        explicitly configured extra host, e.g. a future tunnel hostname)."""
+        h = self.headers.get("Host") or ""
+        if h.startswith("["):
+            host = h.split("]", 1)[0] + "]"
+        else:
+            host = h.split(":", 1)[0]
+        if host in ("127.0.0.1", "localhost", "[::1]"):
+            return True
+        cfg = load_config() or {}
+        return host in (cfg.get("allowed_hosts") or [])
+
     def _local_origin(self):
         """True only for same-machine pages: no Origin header, or a
         localhost origin. Tag editing is local-admin only."""
@@ -533,6 +561,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_OPTIONS(self):
+        if not self._host_ok():
+            self._send(403, {"error": "invalid host"})
+            return
         origin = self._origin_ok()
         self.send_response(204)
         if origin:
@@ -546,6 +577,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not self._host_ok():
+            self._send(403, {"error": "invalid host"})
+            return
         path = self.path.split("?", 1)[0]
         if path == "/":
             try:
@@ -575,6 +609,9 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def do_POST(self):
+        if not self._host_ok():
+            self._send(403, {"error": "invalid host"})
+            return
         path = self.path.split("?", 1)[0]
         if path == "/config":
             cfg = self._read_json_body()

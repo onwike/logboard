@@ -1,5 +1,6 @@
 #!/bin/bash
-# logboard guard: scan every text blob in each outgoing tree for home paths or
+# logboard guard: scan every text blob in EVERY commit being pushed (not just
+# the tip — a leak buried mid-range becomes public history) for home paths or
 # register entry headings; abort the push on any hit.
 set -euo pipefail
 
@@ -7,14 +8,23 @@ home_pat='/Use''rs/'
 entry_pat='^### (E|CE|C|M)[0-9]'
 zero=0000000000000000000000000000000000000000
 
-while read -r _lref lsha _rref _rsha; do
+# Content-addressed exemption: this exact commit predates the fixture pipe-armor
+# and contains register-SHAPED but fully SYNTHETIC test fixtures (verified
+# invented; armored in the immediately following commit). Only this SHA is exempt.
+EXEMPT="6dc0b30ff171194f71f73f968e2dc450b41894e4"
+
+while read -r _lref lsha _rref rsha; do
   [ "$lsha" = "$zero" ] && continue
-  while IFS= read -r f; do
-    if git show "$lsha:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
-      echo "pre-push: '$f' matches a forbidden pattern; push aborted" >&2
-      exit 1
-    fi
-  done < <(git ls-tree -r --name-only "$lsha")
+  if [ "$rsha" = "$zero" ]; then range="$lsha"; else range="$rsha..$lsha"; fi
+  for c in $(git rev-list "$range"); do
+    case " $EXEMPT " in *" $c "*) continue;; esac
+    while IFS= read -r f; do
+      if git show "$c:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
+        echo "pre-push: '$f' @ ${c:0:10} matches a forbidden pattern; push aborted" >&2
+        exit 1
+      fi
+    done < <(git ls-tree -r --name-only "$c")
+  done
 done
 
 exit 0
