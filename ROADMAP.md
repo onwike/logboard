@@ -11,6 +11,36 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v2.00.00 — Tagging help + application self-logging (2026-07-16)
+
+**Major** — Tagging help introduces an optional local-LLM dependency and hands entry
+text to a model, softening the founding "offline / zero-dependency" invariant to
+"your data stays in tools you control." That invariant change is what makes this a
+major bump.
+
+**Shipped:**
+- **Tagging help** — an LLM-assisted bulk-tagging wizard with a mandatory human
+  confirmation gate. Describe the entries to tag + a scope (log types, projects,
+  sessions); a **local** model (`claude -p` or Ollama, chosen in settings) returns
+  matching IDs; the server intersects them with the real corpus (a hallucinated id
+  can never reach a register) and shows them for review; you untick false positives
+  and confirm, then the tag — and, if new, its canon line — is written through the
+  existing guarded editor. The model receives `{id, summary, cause, fix}` only, never
+  file paths.
+- **Application self-logging** — logboard captures its own server exceptions and
+  client-side JS errors into a gitignored `app-errors.md` (a fifth `app_error` log
+  type) and surfaces them in a dedicated App-health panel, kept out of the
+  four-register analytics.
+
+**Quality level:** _to be recorded from the certification run before tagging._
+Gates: `test_logboard.py` (45 tests incl. mocked-model suggest/apply, ID-intersection,
+no-paths-to-model, self-log dedupe, server-exception→clean-500); `serve.py --check`;
+browser-verified both features in light and dark (full wizard describe→confirm→apply
+against fixtures, new-canon creation, App-health from real triggered errors).
+
+**Carried forward:** cloud LLM providers (API keys, behind a loud warning) deferred to
+a future opt-in minor.
+
 ## v1.01.03 — chart axis labels + table pagination (2026-07-16)
 
 **Shipped:** every chart now carries x and y axis labels — the trend and tagging-debt
