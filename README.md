@@ -4,7 +4,7 @@ A local dashboard over markdown issue registers — tool errors, coding errors, 
 
 I log every resolved tool failure, coding defect, corrected assumption, and numeric slip into running markdown registers, so a mistake paid for once is never paid for twice. logboard turns those files into trends, hot-spots, and a searchable console.
 
-![Dashboard in light mode, populated with synthetic demo data](docs/demo-light.png)
+![Dashboard in light mode — a live system with 259 entries; register text is redacted in the capture](docs/demo-light.png)
 
 ## Quickstart
 
@@ -20,7 +20,7 @@ That's it. The config is saved to `roots.json` next to serve.py — gitignored, 
 
 Dark mode follows your system:
 
-![Dashboard in dark mode](docs/demo-dark.png)
+![Dashboard in dark mode — same live system, register text redacted](docs/demo-dark.png)
 
 ## What it shows
 
@@ -86,6 +86,6 @@ The frontend is one static file. Host `index.html` anywhere, open its settings p
 
 - The server binds 127.0.0.1. It writes its own `roots.json`, its `tag-edits.log` journal, and — only through the tag editor — the single `Tags` line of one register entry at a time: lock-guarded, written atomically, re-parsed after every write with automatic restore on any anomaly, and journaled. Nothing else in a register is ever touched. Tag edits are refused for cross-site origins even when `allowed_origins` grants read access, and only canon tags can be added.
 - This repo ships pre-commit and pre-push guards that refuse any path outside the tracked allowlist and any content that looks like a home-directory path or a real register entry. Enable them per clone: `git config core.hooksPath .githooks`
-- The screenshots above are synthetic demo data.
+- The dashboard screenshots are captures of a live system with all register text (summaries, causes, notices) blurred before publishing; the setup screenshot uses synthetic demo data. Numbers, charts, tags, and lane/project labels are shown as-is.
 
 MIT license.
