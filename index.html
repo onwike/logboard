@@ -10,6 +10,7 @@
   --grid:#e1e0d9; --hair:rgba(11,11,11,.10); --axis:#c3c2b7;
   --s-tool:#2a78d6; --s-coding:#1baf7a; --s-corr:#eda100; --s-misc:#008300;
   --emph:#2a78d6; --rest:#d6d5cd; --debt:#898781; --seq:#5598e7;
+  --good:#0ca30c; --bad:#d03b3b;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -17,6 +18,7 @@
     --grid:#2c2c2a; --hair:rgba(255,255,255,.10); --axis:#383835;
     --s-tool:#3987e5; --s-coding:#199e70; --s-corr:#c98500; --s-misc:#008300;
     --emph:#3987e5; --rest:#383835; --seq:#5598e7;
+    --good:#0ca30c; --bad:#e66767;
   }
 }
 *{box-sizing:border-box}
@@ -86,6 +88,19 @@ svg text{fill:var(--muted);font-size:11px;font-family:inherit}
 #setup .lab{width:170px;flex:none;font-size:13px;color:var(--ink2)}
 .res-ok{color:var(--ink2)} .res-bad{color:#c0392b}
 a{color:var(--ink2)}
+#wiz{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 16px}
+.wizcard{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:18px 20px;width:100%;max-width:720px}
+.wizhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.wizhead h2{margin:0}
+#wizClose{border:none;background:transparent;font-size:18px;cursor:pointer;color:var(--muted)}
+.wizbody .frow{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
+.wizbody .lab{width:130px;flex:none;font-size:13px;color:var(--ink2)}
+.wizbody input[type=text],.wizbody textarea{flex:1;min-width:160px;font-size:13px}
+.ck{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--ink2)}
+#wizMatches{max-height:340px;overflow:auto;border:1px solid var(--grid);border-radius:8px;margin:8px 0}
+.wizrow{display:flex;gap:8px;align-items:baseline;padding:6px 10px;border-bottom:1px solid var(--grid)}
+.wizrow:last-child{border-bottom:none}
+.wizrow .mono{flex:none;width:64px}
 </style>
 </head>
 <body>
@@ -113,6 +128,12 @@ a{color:var(--ink2)}
   <div id="cfgRoots"></div>
   <div class="frow"><span class="lab"></span><button id="addRoot">Add project root</button></div>
   <div class="frow"><span class="lab">Tag canon file (optional)</span><input type="text" id="cfgTags" placeholder="~/logs/tags.txt"></div>
+  <div class="frow"><span class="lab">Tagging-help model</span>
+    <select id="cfgProvider"><option value="claude">claude -p (local CLI)</option><option value="ollama">Ollama (offline)</option></select>
+    <input type="text" id="cfgModel" placeholder="ollama model, e.g. llama3.1:8b" style="flex:1;min-width:140px">
+  </div>
+  <p class="muted">Tagging Help sends entry text (summary, cause, fix — never file paths) to a LOCAL model:
+     <span class="mono">claude -p</span> uses your own Claude subscription; Ollama is fully offline. No cloud API, no keys.</p>
   <div class="frow"><span class="lab">Data endpoint (this browser)</span><input type="text" id="cfgEndpoint" placeholder="same origin"></div>
   <p class="muted">The endpoint is a per-browser setting (saved locally) for pointing a remotely
      hosted copy of this page at your local data server. Leave blank when served by serve.py itself.</p>
@@ -132,6 +153,7 @@ a{color:var(--ink2)}
     <button id="tagbtn" class="chip">Tags ▾</button>
     <div id="tagmenu" hidden></div>
   </div>
+  <button id="tagHelpBtn" class="chip" title="LLM-assisted bulk tagging">Tagging help</button>
   <select id="laneSel"><option value="">All lanes</option></select>
   <select id="projSel"><option value="">All projects</option></select>
   <select id="rangeSel">
@@ -208,7 +230,69 @@ a{color:var(--ink2)}
   </div>
 </section>
 
+<section class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <h2>App health <span class="muted" style="font-weight:400">(logboard's own errors — not your registers)</span></h2>
+    <span class="muted num" id="appHealthCount"></span>
+  </div>
+  <div id="appHealth"></div>
+</section>
+
 </main>
+
+<div id="wiz" hidden>
+  <div class="wizcard">
+    <div class="wizhead">
+      <h2 id="wizTitle">Tagging help</h2>
+      <button id="wizClose" title="Close" aria-label="Close">✕</button>
+    </div>
+
+    <div id="wizStep1" class="wizbody">
+      <p class="muted">Describe the entries you want tagged. A local model proposes matches; you confirm before anything is written.</p>
+      <div class="frow"><span class="lab">Tag</span><input type="text" id="wizTag" list="wizTagList" placeholder="e.g. datetime">
+        <datalist id="wizTagList"></datalist></div>
+      <div id="wizNewTag" hidden>
+        <div class="frow"><span class="lab">New tag — applies to</span>
+          <label class="ck"><input type="checkbox" value="E" class="wizApplies">Tool (E)</label>
+          <label class="ck"><input type="checkbox" value="CE" class="wizApplies">Coding (CE)</label>
+          <label class="ck"><input type="checkbox" value="C" class="wizApplies">Corrections (C)</label>
+          <label class="ck"><input type="checkbox" value="M" class="wizApplies">Miscalc (M)</label>
+        </div>
+        <div class="frow"><span class="lab">Definition</span><input type="text" id="wizDef" placeholder="one-line meaning for the canon"></div>
+      </div>
+      <div class="frow"><span class="lab">Search in</span>
+        <label class="ck"><input type="checkbox" value="tool_error" class="wizType">Tool</label>
+        <label class="ck"><input type="checkbox" value="coding_error" class="wizType">Coding</label>
+        <label class="ck"><input type="checkbox" value="correction" class="wizType">Corrections</label>
+        <label class="ck"><input type="checkbox" value="miscalculation" class="wizType">Miscalc</label>
+        <span class="muted">(none = all)</span>
+      </div>
+      <div class="frow"><span class="lab">Projects</span><select id="wizProj" multiple size="3" style="flex:1;min-width:160px"></select></div>
+      <div class="frow"><span class="lab">Sessions</span><input type="text" id="wizSess" placeholder="sid substrings, comma-separated (matched in evidence)"></div>
+      <div class="frow"><span class="lab">Describe</span><textarea id="wizDesc" rows="3" placeholder="anything about timezone or UTC/local parsing drift" style="flex:1;min-width:200px"></textarea></div>
+      <div class="frow"><span class="lab">Model</span>
+        <select id="wizProvider"><option value="claude">claude -p</option><option value="ollama">Ollama</option></select>
+        <input type="text" id="wizModel" placeholder="ollama model (optional)" style="flex:1;min-width:120px">
+      </div>
+      <div class="frow"><span class="lab"></span><button id="wizFind" style="font-weight:600">Find matches</button><span id="wizErr1" class="res-bad" style="margin-left:8px"></span></div>
+    </div>
+
+    <div id="wizStep2" class="wizbody" hidden>
+      <p id="wizMatchInfo" class="muted"></p>
+      <div id="wizMatches"></div>
+      <div class="frow"><span class="lab"></span>
+        <button id="wizBack">‹ Back</button>
+        <button id="wizApply" style="font-weight:600">Apply tag to selected</button>
+        <span id="wizErr2" class="res-bad" style="margin-left:8px"></span>
+      </div>
+    </div>
+
+    <div id="wizStep3" class="wizbody" hidden>
+      <div id="wizDone"></div>
+      <div class="frow"><span class="lab"></span><button id="wizFinish" style="font-weight:600">Done</button></div>
+    </div>
+  </div>
+</div>
 
 <div id="tooltip" hidden></div>
 
@@ -232,6 +316,29 @@ var state={type:'',tags:{},untagged:false,lane:'',project:'',range:0,q:'',page:0
 var pendingJump=null;
 var expanded={};
 var endpoint=localStorage.getItem('lb-endpoint')||'';
+
+/* Report our own client-side errors back to the server's app-health log.
+   Best-effort and rate-limited so an error storm can't flood the register. */
+var _errSent=0,_errLast=0;
+function reportClientError(message,stack){
+  var now=Date.now();
+  if(now-_errLast>10000)_errSent=0;
+  _errLast=now;
+  if(_errSent>=10)return;
+  _errSent++;
+  try{
+    fetch((endpoint||'')+'/log-error',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:String(message).slice(0,500),source:'client',
+        stack:stack?String(stack).slice(0,1500):undefined})}).catch(function(){});
+  }catch(e){}
+}
+window.addEventListener('error',function(ev){
+  reportClientError((ev.message||'script error')+(ev.filename?(' @ '+ev.filename+':'+ev.lineno):''),
+    ev.error&&ev.error.stack);
+});
+window.addEventListener('unhandledrejection',function(ev){
+  var r=ev.reason;reportClientError('unhandled promise rejection: '+(r&&r.message||r),r&&r.stack);
+});
 
 /* Dates are handled ONLY as YYYY-MM-DD strings (lexicographic compare) or
    built from explicit local components — register date strings are never
@@ -307,6 +414,9 @@ function openSetup(firstRun){
     $('#cfgTool').value=gl.tool_error||'';
     $('#cfgCoding').value=gl.coding_error||'';
     $('#cfgTags').value=c.tags_file||'';
+    var llm=c.llm||{};
+    $('#cfgProvider').value=llm.provider||'claude';
+    $('#cfgModel').value=llm.model||'';
     var box=$('#cfgRoots');box.innerHTML='';
     ((c.project_roots&&c.project_roots.length)?c.project_roots:['']).forEach(function(r){box.appendChild(rootRow(r))});
   }).catch(function(){
@@ -316,7 +426,8 @@ function openSetup(firstRun){
 function saveSetup(){
   var ep=$('#cfgEndpoint').value.trim().replace(/\/$/,'');
   if(ep!==endpoint){endpoint=ep;localStorage.setItem('lb-endpoint',endpoint)}
-  var cfg={global_logs:{},project_roots:[],tags_file:$('#cfgTags').value.trim()||null,allowed_origins:[]};
+  var cfg={global_logs:{},project_roots:[],tags_file:$('#cfgTags').value.trim()||null,allowed_origins:[],
+           llm:{provider:$('#cfgProvider').value,model:$('#cfgModel').value.trim()}};
   if($('#cfgTool').value.trim())cfg.global_logs.tool_error=$('#cfgTool').value.trim();
   if($('#cfgCoding').value.trim())cfg.global_logs.coding_error=$('#cfgCoding').value.trim();
   $$('#cfgRoots input').forEach(function(i){if(i.value.trim())cfg.project_roots.push(i.value.trim())});
@@ -749,6 +860,118 @@ function renderAll(preservePage){
   renderHeader();renderWarnings();renderKpis(filtered);renderTrend(filtered);
   renderLanes(filtered);renderProjects(filtered);renderTopTags(filtered);
   renderTopCats(filtered);renderRepeat(filtered);renderDebt();renderTable(filtered);
+  renderAppHealth();
+}
+function renderAppHealth(){
+  var errs=(DATA&&DATA.app_errors)||[];
+  var badge=$('#appHealthCount');
+  badge.textContent=errs.length?(errs.length+' error'+(errs.length===1?'':'s')):'clean';
+  badge.style.color=errs.length?'var(--debt)':'var(--good)';
+  if(!errs.length){$('#appHealth').innerHTML='<div class="empty">No application errors logged. logboard is healthy.</div>';return}
+  var h='<table><colgroup><col style="width:70px"><col style="width:80px"><col><col style="width:150px"><col style="width:58px"></colgroup>'+
+    '<thead><tr><th>ID</th><th>Source</th><th>Error</th><th>Last seen</th><th>Count</th></tr></thead><tbody>';
+  errs.forEach(function(e){
+    var last=e.occurrence_dates.length?e.occurrence_dates[e.occurrence_dates.length-1]:'—';
+    h+='<tr class="row" tabindex="0" data-ae="'+esc(e.id)+'">'+
+       '<td><span class="mono">'+esc(e.id)+'</span></td>'+
+       '<td>'+esc(e.category||'—')+'</td>'+
+       '<td title="'+esc(e.summary)+'">'+esc(e.summary)+'</td>'+
+       '<td class="num">'+esc(last)+'</td>'+
+       '<td class="num">'+e.count+'</td></tr>'+
+       '<tr class="det" style="display:none"><td colspan="5"><div><span class="flabel">Detail</span> '+esc(e.detail||'—')+'</div>'+
+       '<div class="muted mono" style="margin-top:4px">'+esc(e.occurrences_raw||'')+'</div></td></tr>';
+  });
+  h+='</tbody></table>';
+  $('#appHealth').innerHTML=h;
+  $$('#appHealth tr.row').forEach(function(r){
+    function toggle(){var d=r.nextElementSibling;d.style.display=d.style.display==='none'?'':'none'}
+    r.addEventListener('click',toggle);
+    r.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();toggle()}});
+  });
+}
+
+/* ---------- Tagging Help wizard ---------- */
+function wizShow(step){
+  $('#wizStep1').hidden=step!==1;$('#wizStep2').hidden=step!==2;$('#wizStep3').hidden=step!==3;
+}
+function openWizard(){
+  var canon=(DATA&&DATA.tag_canon)||[];
+  $('#wizTagList').innerHTML=canon.map(function(t){return '<option value="'+esc(t.tag)+'">'+esc(t.definition)+'</option>'}).join('');
+  var projs={};(DATA&&DATA.entries||[]).forEach(function(e){if(e.project!=='global')projs[e.project]=1});
+  $('#wizProj').innerHTML=Object.keys(projs).sort().map(function(p){return '<option value="'+esc(p)+'">'+esc(p)+'</option>'}).join('');
+  $('#wizTag').value='';$('#wizDesc').value='';$('#wizSess').value='';$('#wizModel').value='';
+  $('#wizNewTag').hidden=true;$('#wizErr1').textContent='';$('#wizErr2').textContent='';
+  $$('.wizType').forEach(function(c){c.checked=false});$$('.wizApplies').forEach(function(c){c.checked=false});
+  fetch((endpoint||'')+'/config').then(function(r){return r.json()}).then(function(d){
+    var llm=(d.config&&d.config.llm)||{};
+    if(llm.provider)$('#wizProvider').value=llm.provider;
+    if(llm.model)$('#wizModel').value=llm.model;
+  }).catch(function(){});
+  wizShow(1);$('#wiz').hidden=false;
+}
+function wizCheckNewTag(){
+  var canon=(DATA&&DATA.tag_canon)||[];var v=$('#wizTag').value.trim().toLowerCase();
+  var known=canon.some(function(t){return t.tag===v});
+  $('#wizNewTag').hidden=(!v||known);
+}
+function wizFind(){
+  $('#wizErr1').textContent='';
+  var desc=$('#wizDesc').value.trim();
+  if(!desc){$('#wizErr1').textContent='Describe what to tag.';return}
+  var scope={
+    log_types:$$('.wizType').filter(function(c){return c.checked}).map(function(c){return c.value}),
+    projects:Array.prototype.slice.call($('#wizProj').selectedOptions).map(function(o){return o.value}),
+    sessions:$('#wizSess').value.split(',').map(function(s){return s.trim()}).filter(Boolean)
+  };
+  var btn=$('#wizFind');btn.disabled=true;btn.textContent='Asking the model…';
+  fetch((endpoint||'')+'/tag-suggest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({description:desc,scope:scope,
+      model:{provider:$('#wizProvider').value,model:$('#wizModel').value.trim()}})})
+  .then(function(r){return r.json()}).then(function(d){
+    btn.disabled=false;btn.textContent='Find matches';
+    if(!d.ok){$('#wizErr1').textContent=d.message||'The model call failed.';return}
+    wizRenderMatches(d);
+  }).catch(function(){btn.disabled=false;btn.textContent='Find matches';$('#wizErr1').textContent='Server unreachable.'});
+}
+function wizRenderMatches(d){
+  var note=d.matches.length+' of '+d.corpus_size+' entries matched via '+esc(d.model)+
+    (d.sent<d.corpus_size?(' ('+d.sent+' sent to the model)'):'')+
+    '. Untick any that don’t belong, then apply.';
+  $('#wizMatchInfo').innerHTML=note+(d.warnings.length?(' <span class="res-bad">'+esc(d.warnings.join(' ')) +'</span>'):'');
+  if(!d.matches.length){$('#wizMatches').innerHTML='<div class="empty">No matches. Go back and refine the description.</div>';}
+  else{
+    $('#wizMatches').innerHTML=d.matches.map(function(m){
+      return '<label class="wizrow"><input type="checkbox" class="wizPick" checked value="'+esc(m.uid)+'">'+
+        '<span class="mono">'+esc(m.id)+'</span>'+
+        '<span style="flex:1">'+esc(m.summary)+'</span>'+
+        '<span class="muted">'+esc(m.project==='global'?'global':m.project)+'</span></label>';
+    }).join('');
+  }
+  wizShow(2);
+}
+function wizApply(){
+  $('#wizErr2').textContent='';
+  var uids=$$('.wizPick').filter(function(c){return c.checked}).map(function(c){return c.value});
+  if(!uids.length){$('#wizErr2').textContent='Select at least one entry.';return}
+  var tag=$('#wizTag').value.trim().toLowerCase();
+  if(!tag){$('#wizErr2').textContent='Enter a tag on step 1.';return}
+  var body={tag:tag,uids:uids};
+  if(!$('#wizNewTag').hidden){
+    body.applies_to=$$('.wizApplies').filter(function(c){return c.checked}).map(function(c){return c.value});
+    body.definition=$('#wizDef').value.trim();
+    if(!body.applies_to.length){$('#wizErr2').textContent='Pick which registers the new tag applies to.';return}
+  }
+  var btn=$('#wizApply');btn.disabled=true;btn.textContent='Applying…';
+  fetch((endpoint||'')+'/tag-apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  .then(function(r){return r.json()}).then(function(d){
+    btn.disabled=false;btn.textContent='Apply tag to selected';
+    if(!d.ok){$('#wizErr2').textContent=d.message||'Apply failed.';return}
+    var msg='<p><b>'+d.applied+'</b> entr'+(d.applied===1?'y':'ies')+' tagged <span class="pill">'+esc(tag)+'</span>.';
+    if(d.canon)msg+=' Canon: '+esc(d.canon.message)+'.';
+    msg+='</p>';
+    $('#wizDone').innerHTML=msg;
+    wizShow(3);load();
+  }).catch(function(){btn.disabled=false;btn.textContent='Apply tag to selected';$('#wizErr2').textContent='Server unreachable.'});
 }
 
 /* ---------- hash deep links ---------- */
@@ -794,6 +1017,14 @@ $('#gear').addEventListener('click',function(){openSetup(false)});
 $('#addRoot').addEventListener('click',function(){$('#cfgRoots').appendChild(rootRow(''))});
 $('#saveCfg').addEventListener('click',saveSetup);
 $('#badge').addEventListener('click',function(){state.untagged=true;buildTagMenu();renderAll()});
+$('#tagHelpBtn').addEventListener('click',openWizard);
+$('#wizClose').addEventListener('click',function(){$('#wiz').hidden=true});
+$('#wiz').addEventListener('click',function(ev){if(ev.target===$('#wiz'))$('#wiz').hidden=true});
+$('#wizTag').addEventListener('input',wizCheckNewTag);
+$('#wizFind').addEventListener('click',wizFind);
+$('#wizBack').addEventListener('click',function(){wizShow(1)});
+$('#wizApply').addEventListener('click',wizApply);
+$('#wizFinish').addEventListener('click',function(){$('#wiz').hidden=true});
 document.addEventListener('keydown',function(ev){
   if(ev.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='SELECT'){
     ev.preventDefault();$('#q').focus();
