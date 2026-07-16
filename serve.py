@@ -12,6 +12,7 @@ Usage:
   python3 serve.py --audit    strict tag audit; exit 1 on any debt or canon problem
 """
 
+import fcntl
 import json
 import os
 import re
@@ -23,6 +24,7 @@ APP = "logboard"
 BASE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE, "roots.json")
 GOLDEN_PATH = os.path.join(BASE, "golden.local.json")
+AUDIT_LOG = os.path.join(BASE, "tag-edits.log")
 INDEX_PATH = os.path.join(BASE, "index.html")
 PORT = int(os.environ.get("LOGBOARD_PORT", "8799"))
 
@@ -370,6 +372,117 @@ def validate_config(cfg):
     return errors, results
 
 
+def find_register_file(cfg, uid):
+    """Resolve a uid (project:ID) to (path, log_type)."""
+    project, _, eid = uid.partition(":")
+    m = re.match(r"([A-Z]+)\d+$", eid)
+    if not m:
+        return None, None
+    lt = None
+    for k, v in PREFIX.items():
+        if v == m.group(1):
+            lt = k
+    if lt is None:
+        return None, None
+    if project == "global":
+        p = (cfg.get("global_logs") or {}).get(lt)
+        return (expand(p), lt) if p else (None, None)
+    if lt not in ("correction", "miscalculation"):
+        return None, None
+    for root in cfg.get("project_roots") or []:
+        xr = expand(root)
+        if (os.path.basename(xr.rstrip("/")) or xr) == project:
+            fname = "corrections.md" if lt == "correction" else "miscalculations.md"
+            return os.path.join(xr, fname), lt
+    return None, None
+
+
+def edit_tags(cfg, uid, add, remove):
+    """Add/remove tags on ONE entry's Tags line — the only register write this
+    program can perform. Lockf-guarded, atomic, verified after write, journaled.
+    Returns (ok, message, tags_after)."""
+    path, lt = find_register_file(cfg, uid)
+    if not path or not os.path.isfile(path):
+        return False, "unknown uid or register file: %s" % uid, None
+    eid = uid.partition(":")[2]
+    pre = PREFIX[lt]
+    canon, _cw = parse_canon(cfg.get("tags_file"))
+    allowed = dict((t["tag"], set(t["applies_to"])) for t in canon)
+    for t in add:
+        if t not in allowed:
+            return False, "tag %r is not in the canon" % t, None
+        if pre not in allowed[t]:
+            return False, "tag %r is not allowed in the %s register" % (t, pre), None
+    with open(path + ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                original = fh.read()
+            head_count_re = r"(?m)^### %s\d+ " % pre
+            pre_count = len(re.findall(head_count_re, original))
+            lines = original.split("\n")
+            head_re = re.compile(u"^### %s — " % re.escape(eid))
+            start = None
+            for i, ln in enumerate(lines):
+                if head_re.match(ln):
+                    start = i
+                    break
+            if start is None:
+                return False, "entry %s not found in %s" % (eid, os.path.basename(path)), None
+            end = len(lines)
+            for j in range(start + 1, len(lines)):
+                if lines[j].startswith("### ") or MARKER_RE.match(lines[j]):
+                    end = j
+                    break
+            tags_i = None
+            lane_i = None
+            cur = []
+            for j in range(start + 1, end):
+                fm = FIELD_RE.match(lines[j])
+                if not fm:
+                    continue
+                key = fm.group(1).strip()
+                if key == "Tags":
+                    tags_i = j
+                    cur = [t.strip().lower() for t in fm.group(2).split(",") if t.strip()]
+                elif key == "Lane":
+                    lane_i = j
+            new = [t for t in cur if t not in set(remove)]
+            for t in add:
+                if t not in new:
+                    new.append(t)
+            if new == cur:
+                return True, "no change", new
+            if tags_i is not None:
+                if new:
+                    lines[tags_i] = "- **Tags:** " + ", ".join(new)
+                else:
+                    del lines[tags_i]
+            elif new:
+                at = (lane_i + 1) if lane_i is not None else (start + 1)
+                lines.insert(at, "- **Tags:** " + ", ".join(new))
+            candidate = "\n".join(lines)
+            if len(re.findall(head_count_re, candidate)) != pre_count:
+                return False, "refused: edit would change the entry count", None
+            tmp = path + ".logboard-tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(candidate)
+            os.replace(tmp, path)
+            es, _ws = parse_log(path, lt, "verify")
+            if len(es) != pre_count:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(original)
+                os.replace(tmp, path)
+                return False, "post-write verify failed; original content restored", None
+            with open(AUDIT_LOG, "a", encoding="utf-8") as fh:
+                fh.write("%s\t%s\t+%s\t-%s\n" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), uid,
+                    ",".join(add), ",".join(remove)))
+            return True, "updated", new
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = APP
 
@@ -383,6 +496,18 @@ class Handler(BaseHTTPRequestHandler):
         cfg = load_config() or {}
         allowed = cfg.get("allowed_origins") or []
         return origin if origin in allowed else None
+
+    def _local_origin(self):
+        """True only for same-machine pages: no Origin header, or a
+        localhost origin. Tag editing is local-admin only."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        try:
+            host = origin.split("//", 1)[1].split("/")[0].rsplit(":", 1)[0]
+        except IndexError:
+            return False
+        return host in ("127.0.0.1", "localhost", "[::1]")
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
@@ -427,31 +552,58 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": "not found"})
 
-    def do_POST(self):
-        if self.path.split("?", 1)[0] != "/config":
-            self._send(404, {"error": "not found"})
-            return
+    def _read_json_body(self):
         try:
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             n = 0
         if n <= 0 or n > 65536:
-            self._send(400, {"errors": ["body required (max 64 KB)"]})
-            return
+            return None
         try:
-            cfg = json.loads(self.rfile.read(n).decode("utf-8"))
+            return json.loads(self.rfile.read(n).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
-            self._send(400, {"errors": ["body is not valid JSON"]})
-            return
-        errors, results = validate_config(cfg)
-        if errors:
-            self._send(400, {"errors": errors, "results": results})
-            return
-        # The one write this server ever performs: its own config, fixed path.
-        with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-            json.dump(cfg, fh, indent=2)
-            fh.write("\n")
-        self._send(200, {"ok": True, "results": results})
+            return None
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/config":
+            cfg = self._read_json_body()
+            if cfg is None:
+                self._send(400, {"errors": ["body must be JSON (max 64 KB)"]})
+                return
+            errors, results = validate_config(cfg)
+            if errors:
+                self._send(400, {"errors": errors, "results": results})
+                return
+            # Config write: fixed path in this server's own directory.
+            with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+                json.dump(cfg, fh, indent=2)
+                fh.write("\n")
+            self._send(200, {"ok": True, "results": results})
+        elif path == "/tags":
+            if not self._local_origin():
+                self._send(403, {"ok": False, "message": "tag editing is local-admin only"})
+                return
+            body = self._read_json_body()
+            if not isinstance(body, dict) or not isinstance(body.get("uid"), str):
+                self._send(400, {"ok": False, "message": "body must be JSON: {uid, add[], remove[]}"})
+                return
+            add = body.get("add") or []
+            remove = body.get("remove") or []
+            if (not isinstance(add, list) or not isinstance(remove, list)
+                    or any(not isinstance(t, str) for t in add + remove)):
+                self._send(400, {"ok": False, "message": "add/remove must be lists of tag names"})
+                return
+            cfg = load_config()
+            if not cfg:
+                self._send(400, {"ok": False, "message": "server is not configured"})
+                return
+            add = [t.strip().lower() for t in add if t.strip()]
+            remove = [t.strip().lower() for t in remove if t.strip()]
+            ok, message, tags = edit_tags(cfg, body["uid"], add, remove)
+            self._send(200 if ok else 400, {"ok": ok, "message": message, "tags": tags})
+        else:
+            self._send(404, {"error": "not found"})
 
 
 def run_check():

@@ -610,9 +610,34 @@ function detailHtml(e){
     h+=f('How caught',e.category)+f('Wrong',e.cause)+f('Correct',e.fix)+f('Evidence',e.evidence)+
        f('Dates','event '+(e.date_event||'—')+' · logged '+(e.date_logged||'—'));
   }
-  h+=f('Tags',e.tags.length?e.tags.join(', '):'(untagged)');
+  h+=tagsEditor(e);
   h+='<div class="muted mono" style="margin-top:4px">'+esc(e.uid)+' · '+esc(e.source_log)+'</div>';
   return h;
+}
+function tagsEditor(e){
+  var h='<div style="margin-top:4px"><span class="flabel">Tags</span> ';
+  e.tags.forEach(function(t){
+    h+='<span class="pill">'+esc(t)+' <a href="#" data-untag="'+esc(t)+'" data-uid="'+esc(e.uid)+'" title="Remove tag" style="text-decoration:none">×</a></span>';
+  });
+  if(!e.tags.length)h+='<span class="pill" style="border-style:dashed">untagged</span>';
+  var opts='';
+  DATA.tag_canon.forEach(function(t){
+    if(t.applies_to.indexOf(TYPE[e.log_type].pre)>=0&&e.tags.indexOf(t.tag)<0)
+      opts+='<option>'+esc(t.tag)+'</option>';
+  });
+  if(opts)h+=' <select data-addsel="'+esc(e.uid)+'" style="font-size:12px;padding:2px 6px"><option value="">+ tag</option>'+opts+'</select>';
+  h+='</div>';
+  return h;
+}
+function postTags(uid,add,remove){
+  fetch(endpoint+'/tags',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({uid:uid,add:add,remove:remove})})
+  .then(function(r){return r.json()})
+  .then(function(b){
+    if(!b.ok){showError('Tag edit failed: '+(b.message||'unknown error'));return}
+    $('#err').hidden=true;load();
+  })
+  .catch(function(){showError('Tag edit failed: server unreachable.')});
 }
 function renderTable(filtered){
   var rows=filtered.slice().sort(function(a,b){
@@ -726,6 +751,15 @@ document.addEventListener('keydown',function(ev){
   }
 });
 window.addEventListener('hashchange',applyHash);
+$('#tbody').addEventListener('click',function(ev){
+  var a=ev.target.closest?ev.target.closest('a[data-untag]'):null;
+  if(a){ev.preventDefault();ev.stopPropagation();
+    postTags(a.getAttribute('data-uid'),[],[a.getAttribute('data-untag')]);}
+});
+$('#tbody').addEventListener('change',function(ev){
+  var s=ev.target.closest?ev.target.closest('select[data-addsel]'):null;
+  if(s&&s.value){postTags(s.getAttribute('data-addsel'),[s.value],[]);}
+});
 
 load();
 </script>
