@@ -29,6 +29,7 @@ CONFIG_PATH = os.path.join(BASE, "roots.json")
 GOLDEN_PATH = os.path.join(BASE, "golden.local.json")
 AUDIT_LOG = os.path.join(BASE, "tag-edits.log")
 INDEX_PATH = os.path.join(BASE, "index.html")
+APP_LOG = os.path.join(BASE, "app-errors.md")  # logboard's own errors (gitignored)
 PORT = int(os.environ.get("LOGBOARD_PORT", "8799"))
 
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -38,7 +39,7 @@ MARKER_RE = re.compile(r"^<!--\s*\S*-APPEND-HERE\s*-->")
 EVENT_RE = re.compile(r"\|\s*(\d{4}-\d{2}-\d{2})\s*$")
 
 PREFIX = {"tool_error": "E", "coding_error": "CE",
-          "correction": "C", "miscalculation": "M"}
+          "correction": "C", "miscalculation": "M", "app_error": "AE"}
 
 # Raw field label -> normalized slot, per register type. Unknown labels are
 # tolerated (one warning each); values on unknown labels are ignored.
@@ -56,6 +57,10 @@ FIELD_MAPS = {
                        "Correct": "fix", "Miscalculation": "summary_dup",
                        "Evidence": "evidence", "Date": "date_logged_raw",
                        "Tags": "tags_raw"},
+    # logboard's own runtime errors. Same grammar, Occurrences-based like the
+    # global logs; kept out of the four-register analytics (see build_payload).
+    "app_error": {"Source": "category", "Detail": "detail",
+                  "Occurrences": "occurrences_raw"},
 }
 
 ALLOWED_KEYS = {"global_logs", "project_roots", "tags_file", "allowed_origins",
@@ -89,7 +94,7 @@ def normalize(cur, log_type, project, path, warnings):
     date_logged_raw = f.get("date_logged_raw")
     occurrence_dates = []
     date_event = None
-    if log_type in ("tool_error", "coding_error"):
+    if log_type in ("tool_error", "coding_error", "app_error"):
         if occurrences_raw:
             # Bare ";" split mirrors the registers' own index semantics
             # (a parenthetical semicolon counts as a segment there too).
@@ -320,6 +325,9 @@ def build_payload():
         "files": files,
         "tag_canon": canon,
         "canon_warnings": canon_warnings,
+        # logboard's own errors — a separate population, never mixed into the
+        # four-register analytics above.
+        "app_errors": parse_app_errors(),
     }
 
 
@@ -521,6 +529,93 @@ def edit_tags(cfg, uid, add, remove):
             fcntl.flock(lk, fcntl.LOCK_UN)
 
 
+APP_LOG_HEADER = (u"# logboard app errors\n\n"
+                  u"Runtime errors from logboard itself (server exceptions, client JS "
+                  u"errors). Machine-written; surfaced in the App health panel. Not one "
+                  u"of the engineering registers. Gitignored — never published.\n\n"
+                  u"## Details\n\n")
+
+
+def _sig(message):
+    """A short, single-line signature for dedupe — first line, collapsed, capped."""
+    first = (message or "").splitlines()[0] if (message or "").strip() else "unknown error"
+    first = re.sub(r"\s+", " ", first).strip()
+    return first[:120]
+
+
+def log_app_error(source, message, stack=None):
+    """Append/dedupe one app error into app-errors.md. Lock-guarded, atomic.
+    Recurrences of the same signature add an occurrence timestamp, mirroring the
+    E-register. Never raises — self-logging must not crash the request path."""
+    try:
+        source = "client" if source == "client" else "server"
+        sig = _sig(message)
+        detail = re.sub(r"\s+", " ", ((message or "") + ((" | " + stack) if stack else ""))).strip()[:600]
+        ts = time.strftime("%Y-%m-%d %H:%M %Z")
+        with open(APP_LOG + ".lock", "w") as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            try:
+                text = ""
+                if os.path.isfile(APP_LOG):
+                    with open(APP_LOG, encoding="utf-8") as fh:
+                        text = fh.read()
+                else:
+                    text = APP_LOG_HEADER
+                lines = text.split("\n")
+                # Locate an existing block with the same source + signature.
+                nums = [int(m.group(1)) for m in
+                        (re.match(r"^### AE(\d+) ", ln) for ln in lines) if m]
+                target = None
+                for i, ln in enumerate(lines):
+                    hm = re.match(u"^### AE\\d+ — (.*)$", ln)
+                    if hm and hm.group(1).strip() == sig:
+                        # same signature: confirm source matches before merging
+                        src_ok = False
+                        for j in range(i + 1, min(i + 8, len(lines))):
+                            if lines[j].startswith("### "):
+                                break
+                            sm = FIELD_RE.match(lines[j])
+                            if sm and sm.group(1).strip() == "Source":
+                                src_ok = sm.group(2).strip() == source
+                                break
+                        if src_ok:
+                            target = i
+                            break
+                if target is not None:
+                    for j in range(target + 1, len(lines)):
+                        if lines[j].startswith("### "):
+                            break
+                        om = FIELD_RE.match(lines[j])
+                        if om and om.group(1).strip() == "Occurrences":
+                            lines[j] = lines[j] + "; " + ts
+                            break
+                    candidate = "\n".join(lines)
+                else:
+                    nxt = "AE%02d" % ((max(nums) if nums else 0) + 1)
+                    block = (u"### %s — %s\n- **Source:** %s\n- **Detail:** %s\n"
+                             u"- **Occurrences:** %s\n\n" % (nxt, sig, source, detail, ts))
+                    if not text.endswith("\n"):
+                        text += "\n"
+                    candidate = text + block
+                tmp = APP_LOG + ".logboard-tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(candidate)
+                os.replace(tmp, APP_LOG)
+            finally:
+                fcntl.flock(lk, fcntl.LOCK_UN)
+    except Exception:
+        pass  # self-logging is best-effort; never let it break a request
+
+
+def parse_app_errors():
+    if not os.path.isfile(APP_LOG):
+        return []
+    entries, _ = parse_log(APP_LOG, "app_error", "app")
+    entries.sort(key=lambda e: (e["occurrence_dates"][-1] if e["occurrence_dates"] else "",
+                                e["id"]), reverse=True)
+    return entries
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = APP
 
@@ -590,7 +685,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _guard(self, fn):
+        """Run a dispatch body; any unhandled exception is self-logged and
+        returned as a clean 500 — never a stack trace to the client."""
+        try:
+            fn()
+        except Exception as exc:
+            import traceback
+            log_app_error("server", "%s in %s %s: %s"
+                          % (type(exc).__name__, self.command, self.path, exc),
+                          traceback.format_exc())
+            try:
+                self._send(500, {"error": "internal error (logged to app health)"})
+            except Exception:
+                pass
+
     def do_GET(self):
+        self._guard(self._get)
+
+    def do_POST(self):
+        self._guard(self._post)
+
+    def _get(self):
         if not self._host_ok():
             self._send(403, {"error": "invalid host"})
             return
@@ -622,7 +738,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return None
 
-    def do_POST(self):
+    def _post(self):
         if not self._host_ok():
             self._send(403, {"error": "invalid host"})
             return
@@ -663,6 +779,17 @@ class Handler(BaseHTTPRequestHandler):
             remove = [t.strip().lower() for t in remove if t.strip()]
             ok, message, tags = edit_tags(cfg, body["uid"], add, remove)
             self._send(200 if ok else 400, {"ok": ok, "message": message, "tags": tags})
+        elif path == "/log-error":
+            if not self._local_origin():
+                self._send(403, {"ok": False, "message": "local only"})
+                return
+            body = self._read_json_body()
+            if not isinstance(body, dict) or not isinstance(body.get("message"), str):
+                self._send(400, {"ok": False, "message": "body must be JSON: {message, source?, stack?}"})
+                return
+            stack = body.get("stack") if isinstance(body.get("stack"), str) else None
+            log_app_error("client", body["message"], stack)
+            self._send(200, {"ok": True})
         else:
             self._send(404, {"error": "not found"})
 
@@ -702,6 +829,18 @@ def run_check():
         for k in ("uid", "id", "log_type", "summary"):
             if not e[k]:
                 failures.append("%s: empty %s" % (e["uid"], k))
+
+    # app-errors.md is machine-written and has no Index table; just confirm it
+    # parses and its parsed count matches its heading count.
+    if os.path.isfile(APP_LOG):
+        with open(APP_LOG, encoding="utf-8") as fh:
+            atext = fh.read()
+        aheads = count_entries(atext, "AE")
+        aparsed = len(parse_app_errors())
+        if aparsed == aheads:
+            oks.append("app-errors.md: parsed=%d headings=%d" % (aparsed, aheads))
+        else:
+            failures.append("app-errors.md: parsed=%d headings=%d MISMATCH" % (aparsed, aheads))
 
     try:
         json.dumps(build_payload())

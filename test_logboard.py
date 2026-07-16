@@ -188,13 +188,15 @@ class TempConfigMixin(object):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="logboard-test-")
         self.cfg, self.paths = build_fixtures(self.tmp)
-        self._saved = (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH)
+        self._saved = (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH, serve.APP_LOG)
         serve.CONFIG_PATH = os.path.join(self.tmp, "roots.json")
         serve.AUDIT_LOG = os.path.join(self.tmp, "tag-edits.log")
         serve.INDEX_PATH = os.path.join(HERE, "index.html")
+        serve.APP_LOG = os.path.join(self.tmp, "app-errors.md")
 
     def tearDown(self):
-        serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH = self._saved
+        (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH,
+         serve.APP_LOG) = self._saved
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def write_config(self, cfg=None):
@@ -338,6 +340,42 @@ class ConfigValidationTests(TempConfigMixin, unittest.TestCase):
         self.assertEqual(serve.find_register_file(self.cfg, "global:Q01"), (None, None))
 
 
+class AppErrorTests(TempConfigMixin, unittest.TestCase):
+
+    def test_append_dedupe_and_parse(self):
+        serve.log_app_error("server", "ValueError in GET /x: boom", "trace\nline")
+        serve.log_app_error("server", "ValueError in GET /x: boom", "trace again")
+        serve.log_app_error("client", "TypeError at app.js:42")
+        es = serve.parse_app_errors()
+        self.assertEqual(len(es), 2)
+        by_src = dict((e["category"], e) for e in es)
+        self.assertEqual(by_src["server"]["count"], 2)
+        self.assertEqual(len(by_src["server"]["occurrence_dates"]), 2)
+        self.assertEqual(by_src["client"]["count"], 1)
+        # a stack trace's newlines never leak into the summary heading
+        self.assertNotIn("\n", by_src["server"]["summary"])
+
+    def test_same_signature_different_source_not_merged(self):
+        serve.log_app_error("server", "shared message")
+        serve.log_app_error("client", "shared message")
+        self.assertEqual(len(serve.parse_app_errors()), 2)
+
+    def test_app_errors_excluded_from_main_entries(self):
+        self.write_config()
+        serve.log_app_error("server", "boom")
+        payload = serve.build_payload()
+        self.assertEqual(len(payload["app_errors"]), 1)
+        self.assertTrue(all(e["log_type"] != "app_error" for e in payload["entries"]))
+
+    def test_logging_never_raises(self):
+        # a non-writable APP_LOG dir must not propagate an exception
+        serve.APP_LOG = os.path.join(self.tmp, "no-such-dir", "app-errors.md")
+        try:
+            serve.log_app_error("server", "boom")  # must swallow
+        except Exception as exc:
+            self.fail("log_app_error raised: %s" % exc)
+
+
 class EditTagsTests(TempConfigMixin, unittest.TestCase):
 
     def read(self, key):
@@ -460,6 +498,39 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
         self.assertEqual(status, 404)
         status, _, _ = self.req("/nope", data={"x": 1})
         self.assertEqual(status, 404)
+
+    def test_log_error_endpoint_and_origin_gate(self):
+        status, _, body = self.req("/log-error", data={"message": "TypeError x",
+                                                       "source": "client", "stack": "at f"})
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        self.assertEqual(len(serve.parse_app_errors()), 1)
+        # cross-origin is refused (local-admin only)
+        status, _, _ = self.req("/log-error", data={"message": "x"},
+                                headers={"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        # missing message is a 400
+        status, _, _ = self.req("/log-error", data={"source": "client"})
+        self.assertEqual(status, 400)
+
+    def test_server_exception_becomes_clean_500_and_is_logged(self):
+        # force a route body to throw; the guard must log it and return a
+        # clean 500 with no traceback leaked to the client.
+        orig = serve.build_payload
+
+        def boom():
+            raise RuntimeError("kaboom-secret-internal-detail")
+        serve.build_payload = boom
+        try:
+            status, _, body = self.req("/data.json")
+        finally:
+            serve.build_payload = orig
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"kaboom-secret-internal-detail", body)
+        self.assertNotIn(b"Traceback", body)
+        errs = serve.parse_app_errors()
+        self.assertTrue(any(e["category"] == "server" and "RuntimeError" in e["summary"]
+                            for e in errs))
 
     def test_tags_endpoint_and_origin_gate(self):
         self.write_config()

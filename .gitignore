@@ -1,5 +1,8 @@
 roots.json
 golden.local.json
 assignments.json
+app-errors.md
 *.log
+*.lock
+*.logboard-tmp
 .DS_Store
