@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Error observatory — logboard</title>
+<style>
+:root{
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --hair:rgba(11,11,11,.10); --axis:#c3c2b7;
+  --s-tool:#2a78d6; --s-coding:#1baf7a; --s-corr:#eda100; --s-misc:#008300;
+  --emph:#2a78d6; --rest:#d6d5cd; --debt:#898781; --seq:#5598e7;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --hair:rgba(255,255,255,.10); --axis:#383835;
+    --s-tool:#3987e5; --s-coding:#199e70; --s-corr:#c98500; --s-misc:#008300;
+    --emph:#3987e5; --rest:#383835; --seq:#5598e7;
+  }
+}
+*{box-sizing:border-box}
+html{background:var(--page)}
+body{margin:0 auto;max-width:1180px;padding:14px 20px 40px;color:var(--ink);
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:19px;font-weight:600;margin:0}
+h2{font-size:15px;font-weight:600;margin:0 0 8px}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--hair);
+  border-radius:7px;padding:5px 12px;cursor:pointer}
+button:hover{background:var(--surface)}
+input,select{font:inherit;color:inherit;background:var(--surface);
+  border:1px solid var(--hair);border-radius:7px;padding:5px 9px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--s-tool);outline-offset:1px}
+.card{background:var(--surface);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.muted{color:var(--muted);font-size:12px}
+.sub{color:var(--ink2);font-size:13px}
+.dot{width:9px;height:9px;border-radius:2px;display:inline-block;flex:none}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.num{font-variant-numeric:tabular-nums}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+#badge{border-radius:999px;padding:3px 11px;font-size:12px;cursor:pointer;border:1px solid var(--hair);color:var(--ink2)}
+#badge.warn{border-color:var(--debt);color:var(--ink)}
+#filters{position:sticky;top:0;z-index:5;background:var(--page);padding:8px 0 10px;
+  display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--grid);margin-bottom:14px}
+.chip{border-radius:999px;padding:4px 12px;font-size:13px;color:var(--ink2);
+  display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hair);background:none;cursor:pointer}
+.chip.on{background:var(--surface);border-color:var(--muted);color:var(--ink);font-weight:600}
+#tagbox{position:relative}
+#tagmenu{position:absolute;top:110%;left:0;z-index:9;background:var(--surface);
+  border:1px solid var(--hair);border-radius:10px;padding:10px 12px;min-width:230px;max-height:290px;overflow:auto}
+#tagmenu label{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:13px;cursor:pointer}
+#tagmenu input{accent-color:var(--s-tool)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:14px}
+.kpi .v{font-size:24px;font-weight:600}
+.kpi .lbl{display:flex;align-items:center;gap:6px;margin-bottom:2px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.brow{display:flex;align-items:center;gap:8px;margin:6px 0}
+.blab{width:132px;flex:none;font-size:12px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btot{width:36px;flex:none;text-align:right;font-size:12px;color:var(--ink2)}
+.seg{display:flex;gap:2px;min-width:0}
+.hbar{height:13px;border-radius:3px;min-width:2px}
+table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--grid)}
+td{padding:7px 8px;border-bottom:1px solid var(--grid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+tr.row{cursor:pointer}
+tr.row:hover td{background:var(--surface)}
+tr.det td{white-space:normal;background:var(--surface);line-height:1.55;padding:10px 14px}
+.pill{display:inline-block;border:1px solid var(--hair);border-radius:999px;padding:0 8px;
+  font-size:11px;color:var(--ink2);margin-right:4px}
+.flabel{color:var(--muted);font-size:12px}
+#tooltip{position:absolute;z-index:20;background:var(--surface);border:1px solid var(--hair);
+  border-radius:8px;padding:7px 10px;font-size:12px;pointer-events:none;max-width:260px}
+#warnstrip{border-left:3px solid var(--debt);border-radius:0 8px 8px 0}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+.empty{color:var(--muted);padding:14px 0;text-align:center}
+#setup .frow{display:flex;gap:8px;align-items:center;margin:8px 0}
+#setup input[type=text]{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+#setup .lab{width:170px;flex:none;font-size:13px;color:var(--ink2)}
+.res-ok{color:var(--ink2)} .res-bad{color:#c0392b}
+a{color:var(--ink2)}
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h1>Error observatory</h1>
+    <span class="muted" id="fresh"></span>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span id="badge" title="Untagged entries — click to filter"></span>
+    <button id="refresh" title="Reload data">↻</button>
+    <button id="gear" title="Settings">⚙</button>
+  </div>
+</header>
+
+<div id="err" class="card" hidden style="border-left:3px solid #c0392b;border-radius:0 8px 8px 0"></div>
+
+<section id="setup" class="card" hidden>
+  <h2 id="setupTitle">Set up logboard</h2>
+  <p class="sub">Point the dashboard at your register files. Paths stay on this machine, saved to
+     <span class="mono">roots.json</span> next to serve.py (never committed to git).</p>
+  <div class="frow"><span class="lab">Tool error log</span><input type="text" id="cfgTool" placeholder="~/logs/ToolErrorLog.md"></div>
+  <div class="frow"><span class="lab">Coding error log</span><input type="text" id="cfgCoding" placeholder="~/logs/CodingErrorLog.md"></div>
+  <div id="cfgRoots"></div>
+  <div class="frow"><span class="lab"></span><button id="addRoot">Add project root</button></div>
+  <div class="frow"><span class="lab">Tag canon file (optional)</span><input type="text" id="cfgTags" placeholder="~/logs/tags.txt"></div>
+  <div class="frow"><span class="lab">Data endpoint (this browser)</span><input type="text" id="cfgEndpoint" placeholder="same origin"></div>
+  <p class="muted">The endpoint is a per-browser setting (saved locally) for pointing a remotely
+     hosted copy of this page at your local data server. Leave blank when served by serve.py itself.</p>
+  <div class="frow"><span class="lab"></span><button id="saveCfg" style="font-weight:600">Save and load</button></div>
+  <div id="cfgResults"></div>
+</section>
+
+<main id="dash" hidden>
+
+<div id="filters">
+  <button class="chip on" data-type="">All types</button>
+  <button class="chip" data-type="tool_error"><span class="dot" style="background:var(--s-tool)"></span>Tool</button>
+  <button class="chip" data-type="coding_error"><span class="dot" style="background:var(--s-coding)"></span>Coding</button>
+  <button class="chip" data-type="correction"><span class="dot" style="background:var(--s-corr)"></span>Corrections</button>
+  <button class="chip" data-type="miscalculation"><span class="dot" style="background:var(--s-misc)"></span>Miscalc</button>
+  <div id="tagbox">
+    <button id="tagbtn" class="chip">Tags ▾</button>
+    <div id="tagmenu" hidden></div>
+  </div>
+  <select id="laneSel"><option value="">All lanes</option></select>
+  <select id="projSel"><option value="">All projects</option></select>
+  <select id="rangeSel">
+    <option value="30">Last 30 days</option>
+    <option value="7">Last 7 days</option>
+    <option value="90">Last 90 days</option>
+    <option value="0" selected>All time</option>
+  </select>
+  <input type="search" id="q" placeholder="Search summaries, causes, fixes ( / )" style="flex:1;min-width:170px">
+  <span class="muted num" id="count"></span>
+</div>
+
+<div id="warnstrip" class="card" hidden></div>
+
+<div class="kpis" id="kpis"></div>
+
+<section class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+    <h2 id="trendTitle">Entries per day</h2>
+    <div class="legend" id="trendLegend"></div>
+  </div>
+  <div id="trend"></div>
+  <p class="muted" id="trendNote" style="margin:6px 0 0"></p>
+</section>
+
+<div class="two">
+  <section class="card"><h2>By lane</h2><div id="lanes"></div></section>
+  <section class="card"><h2>By project <span class="muted" style="font-weight:400">(corrections + miscalcs; tool/coding logs are global)</span></h2><div id="projects"></div></section>
+</div>
+
+<div class="two">
+  <section class="card"><h2>Top tags</h2><div id="topTags"></div></section>
+  <section class="card"><h2>Top tools and areas</h2><div id="topCats"></div></section>
+</div>
+
+<section class="card">
+  <h2>Repeat offenders <span class="muted" style="font-weight:400">(signatures hit more than once)</span></h2>
+  <div id="repeat"></div>
+</section>
+
+<section class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <h2>Tagging debt</h2>
+    <span class="muted num" id="debtCount"></span>
+  </div>
+  <div id="debt"></div>
+  <p class="muted" style="margin:6px 0 0">Untagged entries by the day they were logged. An untagged entry is an open defect — click a bar to list them.</p>
+</section>
+
+<section class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <h2>All entries</h2>
+    <span class="muted num" id="tblCount"></span>
+  </div>
+  <table>
+    <colgroup><col style="width:72px"><col><col style="width:150px"><col style="width:104px"><col style="width:118px"><col style="width:78px"></colgroup>
+    <thead><tr><th>ID</th><th>Summary</th><th>Tags</th><th>Lane</th><th>Project</th><th>Date</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</section>
+
+</main>
+
+<div id="tooltip" hidden></div>
+
+<script>
+'use strict';
+var $=function(s){return document.querySelector(s)};
+var $$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
+var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+
+var TYPES=[
+  {k:'tool_error',label:'Tool',pre:'E',color:'var(--s-tool)'},
+  {k:'coding_error',label:'Coding',pre:'CE',color:'var(--s-coding)'},
+  {k:'correction',label:'Corrections',pre:'C',color:'var(--s-corr)'},
+  {k:'miscalculation',label:'Miscalc',pre:'M',color:'var(--s-misc)'}
+];
+var TYPE={}; TYPES.forEach(function(t){TYPE[t.k]=t;});
+
+var DATA=null;
+var state={type:'',tags:{},untagged:false,lane:'',project:'',range:0,q:''};
+var expanded={};
+var endpoint=localStorage.getItem('lb-endpoint')||'';
+
+/* Dates are handled ONLY as YYYY-MM-DD strings (lexicographic compare) or
+   built from explicit local components — register date strings are never
+   handed to Date.parse. */
+function pad(n){return (n<10?'0':'')+n}
+function isoFromDate(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function dateFromIso(s){var a=s.split('-');return new Date(+a[0],+a[1]-1,+a[2])}
+function addDays(s,n){var d=dateFromIso(s);d.setDate(d.getDate()+n);return isoFromDate(d)}
+function today(){return isoFromDate(new Date())}
+function shortDate(s){if(!s)return '—';var a=s.split('-');
+  var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return M[+a[1]-1]+' '+(+a[2])}
+
+function tagFilterActive(){return state.untagged||Object.keys(state.tags).length>0}
+
+function passType(e){return !state.type||e.log_type===state.type}
+function passTag(e){
+  if(!tagFilterActive())return true;
+  if(state.untagged&&e.untagged)return true;
+  for(var t in state.tags){if(e.tags.indexOf(t)>=0)return true}
+  return false;
+}
+function passRest(e){
+  if(state.lane){
+    if(state.lane==='__none'){if(e.lane)return false}
+    else if(e.lane!==state.lane)return false;
+  }
+  if(state.project&&e.project!==state.project)return false;
+  if(state.range>0){
+    if(!e.date_best)return false;
+    if(e.date_best<addDays(today(),-(state.range-1)))return false;
+  }
+  if(state.q){
+    var hay=(e.id+' '+e.summary+' '+(e.cause||'')+' '+(e.fix||'')+' '+(e.detail||'')+' '+(e.evidence||'')).toLowerCase();
+    if(hay.indexOf(state.q)<0)return false;
+  }
+  return true;
+}
+function pass(e){return passType(e)&&passTag(e)&&passRest(e)}
+
+/* ---------- data loading ---------- */
+function showError(msg){var el=$('#err');el.hidden=false;el.textContent=msg}
+function load(){
+  $('#err').hidden=true;
+  fetch(endpoint+'/data.json',{cache:'no-store'}).then(function(r){return r.json()})
+  .then(function(d){
+    if(!d||d.app!=='logboard'){showError('The data endpoint did not identify as logboard.');return}
+    DATA=d;
+    if(!d.configured){openSetup(true);return}
+    $('#setup').hidden=true;$('#dash').hidden=false;
+    buildOptions();renderAll();applyHash();
+  })
+  .catch(function(){
+    showError('Cannot reach the data server at '+(endpoint||'this origin')+'. Is serve.py running?');
+    if(!DATA)openSetup(false);
+  });
+}
+
+/* ---------- setup / settings panel ---------- */
+function rootRow(v){
+  var div=document.createElement('div');div.className='frow';
+  div.innerHTML='<span class="lab">Project root</span><input type="text" value="'+esc(v||'')+'" placeholder="~/projects/my-project"><button title="Remove">✕</button>';
+  div.querySelector('button').onclick=function(){div.remove()};
+  return div;
+}
+function openSetup(firstRun){
+  $('#dash').hidden=true;$('#setup').hidden=false;
+  $('#setupTitle').textContent=firstRun?'Set up logboard':'Settings';
+  $('#cfgEndpoint').value=endpoint;
+  fetch(endpoint+'/config',{cache:'no-store'}).then(function(r){return r.json()})
+  .then(function(d){
+    var c=d.config||{};var gl=c.global_logs||{};
+    $('#cfgTool').value=gl.tool_error||'';
+    $('#cfgCoding').value=gl.coding_error||'';
+    $('#cfgTags').value=c.tags_file||'';
+    var box=$('#cfgRoots');box.innerHTML='';
+    ((c.project_roots&&c.project_roots.length)?c.project_roots:['']).forEach(function(r){box.appendChild(rootRow(r))});
+  }).catch(function(){
+    var box=$('#cfgRoots');if(!box.children.length)box.appendChild(rootRow(''));
+  });
+}
+function saveSetup(){
+  var ep=$('#cfgEndpoint').value.trim().replace(/\/$/,'');
+  if(ep!==endpoint){endpoint=ep;localStorage.setItem('lb-endpoint',endpoint)}
+  var cfg={global_logs:{},project_roots:[],tags_file:$('#cfgTags').value.trim()||null,allowed_origins:[]};
+  if($('#cfgTool').value.trim())cfg.global_logs.tool_error=$('#cfgTool').value.trim();
+  if($('#cfgCoding').value.trim())cfg.global_logs.coding_error=$('#cfgCoding').value.trim();
+  $$('#cfgRoots input').forEach(function(i){if(i.value.trim())cfg.project_roots.push(i.value.trim())});
+  if(!cfg.tags_file)delete cfg.tags_file;
+  fetch(endpoint+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)})
+  .then(function(r){return r.json().then(function(b){return {ok:r.ok,body:b}})})
+  .then(function(res){
+    var out=$('#cfgResults');var h='';
+    (res.body.errors||[]).forEach(function(e){h+='<div class="res-bad">✕ '+esc(e)+'</div>'});
+    (res.body.results||[]).forEach(function(r){
+      var extra=r.entries!=null?(' — '+r.entries+' entries'):(r.found?(' — found: '+(r.found.join(', ')||'none')):(r.note?' — '+esc(r.note):''));
+      h+='<div class="'+(r.ok?'res-ok':'res-bad')+'">'+(r.ok?'✓':'•')+' '+esc(r.path)+' <span class="muted">('+esc(r.role)+extra+')</span></div>';
+    });
+    out.innerHTML=h;
+    if(res.ok)load();
+  })
+  .catch(function(){$('#cfgResults').innerHTML='<div class="res-bad">✕ Could not reach the server to save.</div>'});
+}
+
+/* ---------- filter options ---------- */
+function buildOptions(){
+  var lanes={},projs={},hasNull=false;
+  DATA.entries.forEach(function(e){
+    if(e.lane)lanes[e.lane]=1;else hasNull=true;
+    if(e.project!=='global')projs[e.project]=1;
+  });
+  function fill(sel,items,extra){
+    var cur=sel.value;
+    sel.innerHTML='<option value="">'+sel.options[0].textContent+'</option>';
+    items.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o)});
+    if(extra){var o=document.createElement('option');o.value='__none';o.textContent='Unattributed';sel.appendChild(o)}
+    sel.value=cur;
+  }
+  fill($('#laneSel'),Object.keys(lanes).sort(),hasNull);
+  fill($('#projSel'),Object.keys(projs).sort(),false);
+  buildTagMenu();
+}
+function allTagsInData(){
+  var m={};DATA.entries.forEach(function(e){e.tags.forEach(function(t){m[t]=(m[t]||0)+1})});
+  return m;
+}
+function buildTagMenu(){
+  var menu=$('#tagmenu');var inData=allTagsInData();
+  var canon=DATA.tag_canon.map(function(t){return t.tag});
+  var names={};canon.forEach(function(t){names[t]=1});Object.keys(inData).forEach(function(t){names[t]=1});
+  var list=Object.keys(names).sort();
+  var h='<label><input type="checkbox" id="tagUntagged"'+(state.untagged?' checked':'')+'> untagged <span class="muted">(debt)</span></label>';
+  if(list.length)h+='<hr style="border:none;border-top:1px solid var(--grid)">';
+  list.forEach(function(t){
+    var known=canon.indexOf(t)>=0||!canon.length;
+    h+='<label><input type="checkbox" data-tag="'+esc(t)+'"'+(state.tags[t]?' checked':'')+'> '+esc(t)+
+       ' <span class="muted">'+(inData[t]||0)+(known?'':' · not in canon')+'</span></label>';
+  });
+  if(!list.length)h+='<div class="muted" style="padding:4px 0">No tags yet — the canon arrives in phase T1.</div>';
+  menu.innerHTML=h;
+  var un=$('#tagUntagged');
+  if(un)un.onchange=function(){state.untagged=un.checked;syncTagBtn();renderAll()};
+  $$('#tagmenu input[data-tag]').forEach(function(cb){
+    cb.onchange=function(){
+      if(cb.checked)state.tags[cb.getAttribute('data-tag')]=1;
+      else delete state.tags[cb.getAttribute('data-tag')];
+      syncTagBtn();renderAll();
+    };
+  });
+  syncTagBtn();
+}
+function syncTagBtn(){
+  var n=Object.keys(state.tags).length+(state.untagged?1:0);
+  var b=$('#tagbtn');
+  b.textContent=n?('Tags ('+n+') ▾'):'Tags ▾';
+  b.className='chip'+(n?' on':'');
+}
+
+/* ---------- svg chart helpers ---------- */
+function stackedSvg(buckets,series,H){
+  var W=980,padL=34,padB=18,padT=6;H=H||190;
+  var innerW=W-padL-6,innerH=H-padT-padB;
+  var max=1;
+  buckets.forEach(function(b){var s=0;series.forEach(function(sr){s+=b.values[sr.k]||0});if(s>max)max=s});
+  var step=innerW/buckets.length;
+  var bw=Math.max(2,Math.min(22,step-2));
+  var h='<svg role="img" aria-label="Stacked bar chart" viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block" shape-rendering="crispEdges">';
+  var ticks=4;
+  for(var i=0;i<=ticks;i++){
+    var v=Math.round(max*i/ticks),y=padT+innerH-innerH*i/ticks;
+    h+='<line x1="'+padL+'" y1="'+y+'" x2="'+W+'" y2="'+y+'" stroke="var(--grid)" stroke-width="1"/>';
+    h+='<text x="'+(padL-5)+'" y="'+(y+3)+'" text-anchor="end" class="num">'+v+'</text>';
+  }
+  var lblEvery=Math.max(1,Math.ceil(buckets.length/8));
+  buckets.forEach(function(b,i){
+    var x=padL+i*step+(step-bw)/2,y=padT+innerH,total=0;
+    series.forEach(function(sr){
+      var v=b.values[sr.k]||0;if(!v)return;
+      var bh=innerH*v/max;y-=bh;total+=v;
+      h+='<rect x="'+x.toFixed(1)+'" y="'+(y+1).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,bh-1).toFixed(1)+'" rx="1.5" fill="'+sr.color+'"/>';
+    });
+    if(i%lblEvery===0)h+='<text x="'+(padL+i*step+step/2)+'" y="'+(H-4)+'" text-anchor="middle">'+esc(b.label)+'</text>';
+    h+='<rect x="'+(padL+i*step)+'" y="'+padT+'" width="'+step.toFixed(1)+'" height="'+innerH+'" fill="transparent" data-i="'+i+'"/>';
+  });
+  h+='<line x1="'+padL+'" y1="'+(padT+innerH)+'" x2="'+W+'" y2="'+(padT+innerH)+'" stroke="var(--axis)" stroke-width="1"/>';
+  h+='</svg>';
+  return h;
+}
+function attachTooltip(container,buckets,series,onClick){
+  var tip=$('#tooltip');
+  container.addEventListener('mousemove',function(ev){
+    var r=ev.target;
+    if(!(r instanceof SVGRectElement)||!r.hasAttribute('data-i')){tip.hidden=true;return}
+    var b=buckets[+r.getAttribute('data-i')];
+    var rows=series.map(function(sr){var v=b.values[sr.k]||0;return v?('<div><span class="dot" style="background:'+sr.color+'"></span> '+esc(sr.label)+': <b class="num">'+v+'</b></div>'):''}).join('');
+    tip.innerHTML='<b>'+esc(b.title||b.label)+'</b>'+(rows||'<div class="muted">no entries</div>');
+    tip.hidden=false;
+    tip.style.left=(ev.pageX+14)+'px';tip.style.top=(ev.pageY+10)+'px';
+  });
+  container.addEventListener('mouseleave',function(){tip.hidden=true});
+  if(onClick)container.addEventListener('click',function(ev){
+    var r=ev.target;
+    if(r instanceof SVGRectElement&&r.hasAttribute('data-i'))onClick(buckets[+r.getAttribute('data-i')]);
+  });
+}
+function makeBuckets(entries,dateKey,domainFrom,domainTo){
+  var days=[],cur=domainFrom;
+  var span=0,probe=domainFrom;
+  while(probe<=domainTo&&span<4000){span++;probe=addDays(probe,1)}
+  var weekly=span>60;
+  if(weekly){
+    var d=dateFromIso(domainFrom);var off=(d.getDay()+6)%7;cur=addDays(domainFrom,-off);
+  }
+  var stepN=weekly?7:1;
+  while(cur<=domainTo&&days.length<400){
+    days.push({key:cur,label:shortDate(cur),title:weekly?('week of '+shortDate(cur)):shortDate(cur),values:{}});
+    cur=addDays(cur,stepN);
+  }
+  var idx={};days.forEach(function(b,i){idx[b.key]=i});
+  entries.forEach(function(e){
+    var d=e[dateKey];if(!d||d<days[0].key||d>domainTo)return;
+    var b;
+    if(weekly){var dd=dateFromIso(d);var off2=(dd.getDay()+6)%7;b=idx[addDays(d,-off2)]}
+    else b=idx[d];
+    if(b==null)return;
+    days[b].values[e.log_type]=(days[b].values[e.log_type]||0)+1;
+    days[b].values.__match=(days[b].values.__match||0)+(e.__match?1:0);
+    days[b].values.__rest=(days[b].values.__rest||0)+(e.__match?0:1);
+    days[b].values.__debt=(days[b].values.__debt||0)+1;
+  });
+  return {buckets:days,weekly:weekly};
+}
+function domainFor(entries,dateKey){
+  var to=today(),from=null;
+  if(state.range>0){from=addDays(to,-(state.range-1))}
+  else{
+    entries.forEach(function(e){var d=e[dateKey];if(d&&(!from||d<from))from=d});
+    if(!from)from=to;
+  }
+  return {from:from,to:to};
+}
+
+/* ---------- views ---------- */
+function renderKpis(filtered){
+  var base=DATA.entries.filter(function(e){return passTag(e)&&passRest(e)});
+  var t=today(),w1=addDays(t,-6),w2from=addDays(t,-13),w2to=addDays(t,-7);
+  var h='';
+  TYPES.forEach(function(tp){
+    var es=base.filter(function(e){return e.log_type===tp.k});
+    var l7=0,p7=0,all=es.length,byDay={};
+    es.forEach(function(e){
+      var d=e.date_best;if(!d)return;
+      if(d>=w1&&d<=t)l7++;
+      if(d>=w2from&&d<=w2to)p7++;
+      if(d>=addDays(t,-13))byDay[d]=(byDay[d]||0)+1;
+    });
+    var delta=l7-p7;
+    var pts='',mx=1,i;
+    for(i=0;i<14;i++){var v=byDay[addDays(t,i-13)]||0;if(v>mx)mx=v}
+    for(i=0;i<14;i++){
+      var vv=byDay[addDays(t,i-13)]||0;
+      pts+=(i*(100/13)).toFixed(1)+','+(22-(vv/mx)*18).toFixed(1)+' ';
+    }
+    h+='<div class="card kpi" style="margin:0">'+
+       '<div class="lbl muted"><span class="dot" style="background:'+tp.color+'"></span>'+tp.label+' · 7d</div>'+
+       '<div><span class="v num">'+l7+'</span> <span class="muted num">'+(delta>=0?'↑ ':'↓ ')+Math.abs(delta)+' vs prior 7d</span></div>'+
+       '<div class="muted num">'+all+' in view</div>'+
+       '<svg viewBox="0 0 100 24" style="width:100%;height:24px;margin-top:6px" aria-hidden="true"><polyline fill="none" stroke="'+tp.color+'" stroke-width="2" points="'+pts.trim()+'"/></svg>'+
+       '</div>';
+  });
+  $('#kpis').innerHTML=h;
+}
+
+function renderTrend(filtered){
+  var box=$('#trend'),legend=$('#trendLegend'),note=$('#trendNote');
+  var emphasis=tagFilterActive();
+  var series,entries;
+  if(emphasis){
+    entries=DATA.entries.filter(function(e){return passType(e)&&passRest(e)});
+    entries.forEach(function(e){e.__match=passTag(e)});
+    series=[{k:'__match',label:'Matching tag filter',color:'var(--emph)'},
+            {k:'__rest',label:'Other entries',color:'var(--rest)'}];
+  }else{
+    entries=filtered;
+    series=TYPES.map(function(t){return {k:t.k,label:t.label,color:t.color}});
+  }
+  var dom=domainFor(entries,'date_best');
+  var mk=makeBuckets(entries.filter(function(e){return e.date_best}),'date_best',dom.from,dom.to);
+  $('#trendTitle').textContent='Entries per '+(mk.weekly?'week':'day');
+  legend.innerHTML=series.map(function(s){return '<span><span class="dot" style="background:'+s.color+'"></span>'+esc(s.label)+'</span>'}).join('');
+  if(!mk.buckets.length){box.innerHTML='<div class="empty">No dated entries in this view.</div>';note.textContent='';return}
+  box.innerHTML=stackedSvg(mk.buckets,series);
+  attachTooltip(box,mk.buckets,series);
+  var notes=[];
+  if(emphasis)notes.push('Emphasis view: colored = entries matching the tag filter, gray = everything else in view.');
+  notes.push('Corrections and miscalcs plot by event date where their evidence carries one; the register backfill day (Jul 3) is real data.');
+  note.textContent=notes.join(' ');
+}
+
+function hbarRows(el,rows,maxW){
+  if(!rows.length){el.innerHTML='<div class="empty">Nothing in this view.</div>';return}
+  var mx=1;rows.forEach(function(r){if(r.total>mx)mx=r.total});
+  var h='';
+  rows.forEach(function(r){
+    h+='<div class="brow"><span class="blab" title="'+esc(r.label)+'">'+esc(r.label)+'</span>'+
+       '<span class="seg" style="width:'+((r.total/mx)*(maxW||62))+'%">';
+    r.parts.forEach(function(p){
+      if(p.v>0)h+='<span class="hbar" style="background:'+p.color+';flex:'+p.v+'" title="'+esc(p.label)+': '+p.v+'"></span>';
+    });
+    h+='</span><span style="flex:1"></span><span class="btot num">'+r.total+'</span></div>';
+  });
+  el.innerHTML=h;
+}
+function renderLanes(filtered){
+  var m={};
+  filtered.forEach(function(e){
+    var k=e.lane||'Unattributed';
+    if(!m[k]){m[k]={}}m[k][e.log_type]=(m[k][e.log_type]||0)+1;
+  });
+  var rows=Object.keys(m).map(function(k){
+    var total=0;var parts=TYPES.map(function(t){var v=m[k][t.k]||0;total+=v;return {v:v,color:t.color,label:t.label}});
+    return {label:k,total:total,parts:parts};
+  }).sort(function(a,b){return b.total-a.total});
+  hbarRows($('#lanes'),rows);
+}
+function renderProjects(filtered){
+  var m={};
+  filtered.forEach(function(e){
+    if(e.project==='global')return;
+    if(!m[e.project])m[e.project]={};
+    m[e.project][e.log_type]=(m[e.project][e.log_type]||0)+1;
+  });
+  var rows=Object.keys(m).map(function(k){
+    var total=0;var parts=TYPES.map(function(t){var v=m[k][t.k]||0;total+=v;return {v:v,color:t.color,label:t.label}});
+    return {label:k,total:total,parts:parts};
+  }).sort(function(a,b){return b.total-a.total});
+  hbarRows($('#projects'),rows);
+}
+function renderTopTags(filtered){
+  var m={};filtered.forEach(function(e){e.tags.forEach(function(t){m[t]=(m[t]||0)+1})});
+  var rows=Object.keys(m).sort(function(a,b){return m[b]-m[a]}).slice(0,8)
+    .map(function(t){return {label:t,total:m[t],parts:[{v:m[t],color:'var(--seq)',label:t}]}});
+  if(!rows.length){$('#topTags').innerHTML='<div class="empty">No tags yet — phase T1 populates the canon, then entries get tagged.</div>';return}
+  hbarRows($('#topTags'),rows);
+}
+function renderTopCats(filtered){
+  var m={};
+  filtered.forEach(function(e){
+    if(e.log_type!=='tool_error'&&e.log_type!=='coding_error')return;
+    if(!e.category)return;
+    m[e.category]=(m[e.category]||0)+1;
+  });
+  var rows=Object.keys(m).sort(function(a,b){return m[b]-m[a]}).slice(0,8)
+    .map(function(t){return {label:t,total:m[t],parts:[{v:m[t],color:'var(--seq)',label:t}]}});
+  hbarRows($('#topCats'),rows);
+}
+function renderRepeat(filtered){
+  var rows=filtered.filter(function(e){return e.count>1}).sort(function(a,b){return b.count-a.count});
+  if(!rows.length){$('#repeat').innerHTML='<div class="empty">No repeat signatures in this view — nothing has bitten twice.</div>';return}
+  var h='';
+  rows.forEach(function(e){
+    h+='<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--grid)">'+
+       '<span class="mono"><span class="dot" style="background:'+TYPE[e.log_type].color+'"></span> '+esc(e.id)+'</span>'+
+       '<a href="#'+esc(e.id)+'" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;color:var(--ink)">'+esc(e.summary)+'</a>'+
+       '<span class="muted num">×'+e.count+'</span></div>';
+  });
+  $('#repeat').innerHTML=h;
+}
+function renderDebt(){
+  var pool=DATA.entries.filter(function(e){return e.untagged&&passType(e)&&passRest(e)});
+  $('#debtCount').textContent=pool.length+' untagged in view';
+  if(!pool.length){$('#debt').innerHTML='<div class="empty">All entries tagged.</div>';return}
+  var dom=domainFor(pool,'date_logged');
+  var mk=makeBuckets(pool.filter(function(e){return e.date_logged}),'date_logged',dom.from,dom.to);
+  var series=[{k:'__debt',label:'Untagged',color:'var(--debt)'}];
+  $('#debt').innerHTML=stackedSvg(mk.buckets,series,130);
+  attachTooltip($('#debt'),mk.buckets,series,function(){
+    state.untagged=true;buildTagMenu();renderAll();
+    $('#tbody').scrollIntoView({behavior:'smooth'});
+  });
+}
+function detailHtml(e){
+  function f(label,val){return val?('<div><span class="flabel">'+esc(label)+'</span> '+esc(val)+'</div>'):''}
+  var h='';
+  if(e.log_type==='tool_error'||e.log_type==='coding_error'){
+    h+=f(e.log_type==='tool_error'?'Tool':'Area',e.category)+f('Root cause',e.cause)+
+       f(e.log_type==='tool_error'?'Resolution':'Fix',e.fix)+f('Detail',e.detail)+
+       f('Occurrences ('+e.count+')',e.occurrences_raw);
+  }else if(e.log_type==='correction'){
+    h+=f('Trigger',e.category)+f('Wrong',e.cause)+f('Correction',e.fix)+f('Evidence',e.evidence)+
+       f('Dates','event '+(e.date_event||'—')+' · logged '+(e.date_logged||'—'));
+  }else{
+    h+=f('How caught',e.category)+f('Wrong',e.cause)+f('Correct',e.fix)+f('Evidence',e.evidence)+
+       f('Dates','event '+(e.date_event||'—')+' · logged '+(e.date_logged||'—'));
+  }
+  h+=f('Tags',e.tags.length?e.tags.join(', '):'(untagged)');
+  h+='<div class="muted mono" style="margin-top:4px">'+esc(e.uid)+' · '+esc(e.source_log)+'</div>';
+  return h;
+}
+function renderTable(filtered){
+  var rows=filtered.slice().sort(function(a,b){
+    var da=a.date_best||'',db=b.date_best||'';
+    if(da!==db)return da<db?1:-1;
+    return a.uid<b.uid?1:-1;
+  });
+  $('#tblCount').textContent=rows.length+' of '+DATA.entry_count+' entries';
+  var h='';
+  rows.forEach(function(e){
+    var open=!!expanded[e.uid];
+    var pills=e.tags.slice(0,3).map(function(t){return '<span class="pill">'+esc(t)+'</span>'}).join('')+
+      (e.tags.length>3?'<span class="pill">+'+(e.tags.length-3)+'</span>':'')+
+      (e.untagged?'<span class="pill" style="border-style:dashed">untagged</span>':'');
+    h+='<tr class="row" data-uid="'+esc(e.uid)+'" tabindex="0" id="row-'+esc(e.uid).replace(/[^a-zA-Z0-9_-]/g,'_')+'">'+
+       '<td><span class="mono"><span class="dot" style="background:'+TYPE[e.log_type].color+'"></span> '+esc(e.id)+'</span></td>'+
+       '<td title="'+esc(e.summary)+'">'+esc(e.summary)+'</td>'+
+       '<td>'+pills+'</td>'+
+       '<td>'+esc(e.lane||'—')+'</td>'+
+       '<td>'+esc(e.project==='global'?'Global':e.project)+'</td>'+
+       '<td class="num">'+shortDate(e.date_best)+'</td></tr>'+
+       '<tr class="det"'+(open?'':' style="display:none"')+'><td colspan="6">'+detailHtml(e)+'</td></tr>';
+  });
+  var tb=$('#tbody');
+  tb.innerHTML=h||'<tr><td colspan="6" class="empty">No entries match the current filters.</td></tr>';
+  $$('#tbody tr.row').forEach(function(r){
+    function toggle(){
+      var uid=r.getAttribute('data-uid'),det=r.nextElementSibling;
+      var show=det.style.display==='none';
+      det.style.display=show?'':'none';
+      if(show)expanded[uid]=1;else delete expanded[uid];
+    }
+    r.addEventListener('click',toggle);
+    r.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();toggle()}});
+  });
+}
+function renderWarnings(){
+  var ws=[];
+  DATA.files.forEach(function(f){f.warnings.forEach(function(w){ws.push(f.project+' '+f.log_type+': '+w)})});
+  DATA.canon_warnings.forEach(function(w){ws.push('tag canon: '+w)});
+  if(DATA.tag_canon.length){
+    var canon={};DATA.tag_canon.forEach(function(t){canon[t.tag]=1});
+    var bad={};DATA.entries.forEach(function(e){e.tags.forEach(function(t){if(!canon[t])bad[t]=1})});
+    Object.keys(bad).forEach(function(t){ws.push('tag not in canon: '+t)});
+  }
+  var el=$('#warnstrip');
+  if(!ws.length){el.hidden=true;return}
+  el.hidden=false;
+  el.innerHTML='<b>'+ws.length+' parse/tag notice'+(ws.length>1?'s':'')+'</b><div class="sub">'+ws.map(esc).join('<br>')+'</div>';
+}
+function renderHeader(){
+  var files=DATA.files.filter(function(f){return f.present}).length;
+  var t=DATA.generated_at.split('T')[1]||'';
+  $('#fresh').textContent='parsed '+DATA.entry_count+' entries from '+files+' files · '+t.slice(0,5);
+  var un=DATA.entries.filter(function(e){return e.untagged}).length;
+  var b=$('#badge');
+  b.textContent=un+' untagged';
+  b.className=un?'warn':'';
+}
+function renderAll(){
+  if(!DATA||!DATA.configured)return;
+  var filtered=DATA.entries.filter(pass);
+  $('#count').textContent=filtered.length+' of '+DATA.entry_count+' shown';
+  renderHeader();renderWarnings();renderKpis(filtered);renderTrend(filtered);
+  renderLanes(filtered);renderProjects(filtered);renderTopTags(filtered);
+  renderTopCats(filtered);renderRepeat(filtered);renderDebt();renderTable(filtered);
+}
+
+/* ---------- hash deep links ---------- */
+function applyHash(){
+  var hash=decodeURIComponent(location.hash.replace(/^#/,''));
+  if(!hash)return;
+  if(hash.indexOf('tag=')===0){
+    var t=hash.slice(4).toLowerCase();
+    if(t==='untagged')state.untagged=true;else state.tags[t]=1;
+    buildTagMenu();renderAll();
+    return;
+  }
+  var matches=DATA.entries.filter(function(e){return e.id===hash});
+  if(matches.length){
+    matches.forEach(function(e){expanded[e.uid]=1});
+    renderAll();
+    var el=$('#row-'+matches[0].uid.replace(/[^a-zA-Z0-9_-]/g,'_'));
+    if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
+  }
+}
+
+/* ---------- wiring ---------- */
+$$('#filters .chip[data-type]').forEach(function(c){
+  c.addEventListener('click',function(){
+    $$('#filters .chip[data-type]').forEach(function(x){x.classList.remove('on')});
+    c.classList.add('on');
+    state.type=c.getAttribute('data-type');
+    renderAll();
+  });
+});
+$('#tagbtn').addEventListener('click',function(ev){ev.stopPropagation();$('#tagmenu').hidden=!$('#tagmenu').hidden});
+document.addEventListener('click',function(ev){if(!$('#tagbox').contains(ev.target))$('#tagmenu').hidden=true});
+$('#laneSel').addEventListener('change',function(){state.lane=this.value;renderAll()});
+$('#projSel').addEventListener('change',function(){state.project=this.value;renderAll()});
+$('#rangeSel').addEventListener('change',function(){state.range=+this.value;renderAll()});
+$('#q').addEventListener('input',function(){state.q=this.value.trim().toLowerCase();renderAll()});
+$('#refresh').addEventListener('click',load);
+$('#gear').addEventListener('click',function(){openSetup(false)});
+$('#addRoot').addEventListener('click',function(){$('#cfgRoots').appendChild(rootRow(''))});
+$('#saveCfg').addEventListener('click',saveSetup);
+$('#badge').addEventListener('click',function(){state.untagged=true;buildTagMenu();renderAll()});
+document.addEventListener('keydown',function(ev){
+  if(ev.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='SELECT'){
+    ev.preventDefault();$('#q').focus();
+  }
+});
+window.addEventListener('hashchange',applyHash);
+
+load();
+</script>
+</body>
+</html>
