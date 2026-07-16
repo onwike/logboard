@@ -372,6 +372,17 @@ def validate_config(cfg):
     return errors, results
 
 
+def count_entries(text, prefix):
+    """Heading count with the same below-marker semantics as parse_log:
+    anything after the append marker does not exist."""
+    kept = []
+    for line in text.splitlines():
+        if MARKER_RE.match(line):
+            break
+        kept.append(line)
+    return len(re.findall(r"(?m)^### %s\d+ " % prefix, "\n".join(kept)))
+
+
 def find_register_file(cfg, uid):
     """Resolve a uid (project:ID) to (path, log_type)."""
     project, _, eid = uid.partition(":")
@@ -418,8 +429,7 @@ def edit_tags(cfg, uid, add, remove):
         try:
             with open(path, encoding="utf-8") as fh:
                 original = fh.read()
-            head_count_re = r"(?m)^### %s\d+ " % pre
-            pre_count = len(re.findall(head_count_re, original))
+            pre_count = count_entries(original, pre)
             lines = original.split("\n")
             head_re = re.compile(u"^### %s — " % re.escape(eid))
             start = None
@@ -462,7 +472,7 @@ def edit_tags(cfg, uid, add, remove):
                 at = (lane_i + 1) if lane_i is not None else (start + 1)
                 lines.insert(at, "- **Tags:** " + ", ".join(new))
             candidate = "\n".join(lines)
-            if len(re.findall(head_count_re, candidate)) != pre_count:
+            if count_entries(candidate, pre) != pre_count:
                 return False, "refused: edit would change the entry count", None
             tmp = path + ".logboard-tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
@@ -628,7 +638,7 @@ def run_check():
         with open(xp, encoding="utf-8") as fh:
             text = fh.read()
         prefix = PREFIX[meta["log_type"]]
-        heads = len(re.findall(r"(?m)^### %s\d+ " % prefix, text))
+        heads = count_entries(text, prefix)
         rows = len(re.findall(r"(?m)^\| ?%s\d+ " % prefix, text))
         line = "%s: parsed=%d headings=%d index-rows=%d" % (
             meta["path"], meta["entry_count"], heads, rows)
