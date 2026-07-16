@@ -376,6 +376,67 @@ class AppErrorTests(TempConfigMixin, unittest.TestCase):
             self.fail("log_app_error raised: %s" % exc)
 
 
+class TaggingHelpTests(TempConfigMixin, unittest.TestCase):
+    """Feature 1 backend, with the model mocked — the suite never calls a real LLM."""
+
+    def setUp(self):
+        super(TaggingHelpTests, self).setUp()
+        self._orig_model = serve.run_model
+
+    def tearDown(self):
+        serve.run_model = self._orig_model
+        super(TaggingHelpTests, self).tearDown()
+
+    def mock_model(self, returns):
+        self.captured_prompt = {}
+
+        def fake(provider, model, prompt, timeout=120):
+            self.captured_prompt["p"] = prompt
+            return returns
+        serve.run_model = fake
+
+    def test_extract_id_list_tolerant(self):
+        self.assertEqual(serve.extract_id_list('["E01","E02"]'), ["E01", "E02"])
+        self.assertEqual(serve.extract_id_list('here: ["E01"] ok'), ["E01"])
+        self.assertEqual(serve.extract_id_list("```json\n[\"M01\"]\n```"), ["M01"])
+        self.assertEqual(serve.extract_id_list("none"), [])
+        self.assertEqual(serve.extract_id_list("[bad"), [])
+
+    def test_suggest_intersects_and_drops_invented_ids(self):
+        self.mock_model('["E01","GHOST-999"]')
+        r = serve.tag_suggest(self.cfg, {"log_types": ["tool_error"]},
+                              "anything", "mock", "")
+        ids = [m["id"] for m in r["matches"]]
+        self.assertIn("E01", ids)
+        self.assertNotIn("GHOST-999", ids)
+
+    def test_suggest_sends_no_paths_to_model(self):
+        self.mock_model("[]")
+        serve.tag_suggest(self.cfg, {}, "x", "mock", "")
+        prompt = self.captured_prompt["p"]
+        self.assertNotIn(self.tmp, prompt)          # no temp path
+        self.assertNotIn("source_log", prompt)
+        self.assertNotIn(".md", prompt)
+
+    def test_suggest_scope_limits_corpus(self):
+        self.mock_model("[]")
+        r = serve.tag_suggest(self.cfg, {"log_types": ["miscalculation"]}, "x", "mock", "")
+        self.assertEqual(r["corpus_size"], 1)       # only M01 in the fixture
+
+    def test_append_canon_tag_valid_dup_and_bad(self):
+        ok, msg = serve.append_canon_tag(self.cfg, "deploy", ["E", "C"], "shipping issues")
+        self.assertTrue(ok)
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        self.assertIn("deploy", [t["tag"] for t in tags])
+        ok, msg = serve.append_canon_tag(self.cfg, "deploy", ["E"], "again")
+        self.assertTrue(ok)
+        self.assertEqual(msg, "already in canon")
+        ok, _ = serve.append_canon_tag(self.cfg, "Bad Tag!", ["E"], "x")
+        self.assertFalse(ok)
+        ok, _ = serve.append_canon_tag(self.cfg, "ok", ["Z"], "x")
+        self.assertFalse(ok)
+
+
 class EditTagsTests(TempConfigMixin, unittest.TestCase):
 
     def read(self, key):
@@ -512,6 +573,59 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
         # missing message is a 400
         status, _, _ = self.req("/log-error", data={"source": "client"})
         self.assertEqual(status, 400)
+
+    def test_tag_suggest_and_apply_flow(self):
+        self.write_config()
+        orig = serve.run_model
+        serve.run_model = lambda p, m, prompt, timeout=120: '["CE02"]'
+        try:
+            status, _, body = self.req("/tag-suggest",
+                data={"description": "off-by-one bugs", "scope": {"log_types": ["coding_error"]},
+                      "model": {"provider": "mock"}})
+            d = json.loads(body)
+            self.assertEqual(status, 200)
+            self.assertTrue(d["ok"])
+            self.assertEqual([m["id"] for m in d["matches"]], ["CE02"])
+        finally:
+            serve.run_model = orig
+        # apply a NEW canon tag to the confirmed uid
+        status, _, body = self.req("/tag-apply",
+            data={"tag": "off-by-one", "applies_to": ["CE"], "definition": "fencepost errors",
+                  "uids": ["global:CE02"]})
+        d = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(d["applied"], 1)
+        self.assertEqual(d["canon"]["message"], "added to canon")
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        self.assertIn("off-by-one", [t["tag"] for t in tags])
+        # re-applying is a no-op
+        status, _, body = self.req("/tag-apply",
+            data={"tag": "off-by-one", "uids": ["global:CE02"]})
+        self.assertEqual(json.loads(body)["applied"], 0)
+
+    def test_tag_endpoints_origin_gated(self):
+        self.write_config()
+        for path in ("/tag-suggest", "/tag-apply"):
+            status, _, _ = self.req(path, data={"description": "x", "tag": "y", "uids": []},
+                                    headers={"Origin": "https://evil.example"})
+            self.assertEqual(status, 403, path)
+
+    def test_model_error_surfaced_not_500(self):
+        self.write_config()
+        orig = serve.run_model
+
+        def boom(p, m, prompt, timeout=120):
+            raise serve.ModelError("Ollama unreachable")
+        serve.run_model = boom
+        try:
+            status, _, body = self.req("/tag-suggest",
+                data={"description": "x", "model": {"provider": "ollama"}})
+        finally:
+            serve.run_model = orig
+        self.assertEqual(status, 200)
+        d = json.loads(body)
+        self.assertFalse(d["ok"])
+        self.assertIn("Ollama", d["message"])
 
     def test_server_exception_becomes_clean_500_and_is_logged(self):
         # force a route body to throw; the guard must log it and return a
