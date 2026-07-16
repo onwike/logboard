@@ -19,7 +19,9 @@ while read -r _lref lsha _rref rsha; do
   for c in $(git rev-list "$range"); do
     case " $EXEMPT " in *" $c "*) continue;; esac
     while IFS= read -r f; do
-      if git show "$c:$f" | grep -I -Eq "$home_pat|$entry_pat"; then
+      # grep consumes all input (no -q): a -q early-exit under pipefail sends
+      # SIGPIPE upstream and the pipeline's 141 reads as "no match" on big files.
+      if git show "$c:$f" | grep -I -E "$home_pat|$entry_pat" >/dev/null; then
         echo "pre-push: '$f' @ ${c:0:10} matches a forbidden pattern; push aborted" >&2
         exit 1
       fi

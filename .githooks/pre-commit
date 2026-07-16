@@ -19,7 +19,10 @@ done < <(git diff --cached --name-only --diff-filter=ACMR)
 
 home_pat='/Use''rs/'
 entry_pat='^\+### (E|CE|C|M)[0-9]'
-if git diff --cached --diff-filter=ACMR --unified=0 | grep -E '^\+' | grep -Eq "$home_pat|$entry_pat"; then
+# grep must CONSUME all input (no -q early-exit): under `set -o pipefail` an
+# early grep exit sends SIGPIPE upstream, the pipeline returns 141, and an `if`
+# reads that as "no match" — a false clean on large inputs. Redirect instead.
+if git diff --cached --diff-filter=ACMR --unified=0 | grep -E '^\+' | grep -E "$home_pat|$entry_pat" >/dev/null; then
   echo "pre-commit: staged content matches a home-path or register-entry pattern" >&2
   fail=1
 fi

@@ -552,6 +552,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("unresolvable", out)
 
+    def test_pre_push_catches_large_file_leak(self):
+        """A home-path leak at the top of a >100KB blob must still abort the
+        push — guards against the SIGPIPE/pipefail false-clean on big files."""
+        repo = os.path.join(self.tmp, "repo")
+        os.makedirs(repo)
+        hook = os.path.join(HERE, ".githooks", "pre-push")
+        if not os.path.isfile(hook):
+            self.skipTest("pre-push hook not present")
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+        leak = "/Use" + "rs/secret/leak\n" + ("padding line\n" * 40000)
+        with open(os.path.join(repo, "big.md"), "w") as fh:
+            fh.write(leak)
+        subprocess.run(["git", "add", "big.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "big"], cwd=repo, check=True)
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                             capture_output=True, text=True).stdout.strip()
+        zero = "0" * 40
+        stdin = "refs/heads/main %s refs/heads/main %s\n" % (sha, zero)
+        proc = subprocess.run(["bash", hook], cwd=repo, input=stdin,
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, "large-file leak was not caught")
+        self.assertIn("forbidden pattern", proc.stderr)
+
     def test_check_unconfigured_exits_2(self):
         os.remove(os.path.join(self.app, "roots.json"))
         code, _ = self.run_app("serve.py", "--check")
