@@ -129,11 +129,12 @@ a{color:var(--ink2)}
   <div class="frow"><span class="lab"></span><button id="addRoot">Add project root</button></div>
   <div class="frow"><span class="lab">Tag canon file (optional)</span><input type="text" id="cfgTags" placeholder="~/logs/tags.txt"></div>
   <div class="frow"><span class="lab">Tagging-help model</span>
-    <select id="cfgProvider"><option value="claude">claude -p (local CLI)</option><option value="ollama">Ollama (offline)</option></select>
+    <select id="cfgProvider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud model, via your CLI)</option></select>
     <input type="text" id="cfgModel" placeholder="ollama model, e.g. llama3.1:8b" style="flex:1;min-width:140px">
   </div>
-  <p class="muted">Tagging Help sends entry text (summary, cause, fix — never file paths) to a LOCAL model:
-     <span class="mono">claude -p</span> uses your own Claude subscription; Ollama is fully offline. No cloud API, no keys.</p>
+  <p class="muted">Tagging Help sends entry text (summary, cause, fix — never file paths) to the model you pick.
+     <b>Ollama</b> runs fully offline on this machine. <b>claude -p</b> runs through your local CLI but sends that
+     text to <b>Anthropic's cloud</b> (your own subscription). logboard itself holds no API key and calls no cloud service directly.</p>
   <div class="frow"><span class="lab">Data endpoint (this browser)</span><input type="text" id="cfgEndpoint" placeholder="same origin"></div>
   <p class="muted">The endpoint is a per-browser setting (saved locally) for pointing a remotely
      hosted copy of this page at your local data server. Leave blank when served by serve.py itself.</p>
@@ -271,9 +272,10 @@ a{color:var(--ink2)}
       <div class="frow"><span class="lab">Sessions</span><input type="text" id="wizSess" placeholder="sid substrings, comma-separated (matched in evidence)"></div>
       <div class="frow"><span class="lab">Describe</span><textarea id="wizDesc" rows="3" placeholder="anything about timezone or UTC/local parsing drift" style="flex:1;min-width:200px"></textarea></div>
       <div class="frow"><span class="lab">Model</span>
-        <select id="wizProvider"><option value="claude">claude -p</option><option value="ollama">Ollama</option></select>
+        <select id="wizProvider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud, via CLI)</option></select>
         <input type="text" id="wizModel" placeholder="ollama model (optional)" style="flex:1;min-width:120px">
       </div>
+      <div class="frow"><span class="lab"></span><span id="wizCloudNote" class="muted" hidden>⚠ claude -p sends the in-scope entry text to Anthropic. Pick Ollama to keep it fully on this machine.</span></div>
       <div class="frow"><span class="lab"></span><button id="wizFind" style="font-weight:600">Find matches</button><span id="wizErr1" class="res-bad" style="margin-left:8px"></span></div>
     </div>
 
@@ -902,12 +904,16 @@ function openWizard(){
   $('#wizTag').value='';$('#wizDesc').value='';$('#wizSess').value='';$('#wizModel').value='';
   $('#wizNewTag').hidden=true;$('#wizErr1').textContent='';$('#wizErr2').textContent='';
   $$('.wizType').forEach(function(c){c.checked=false});$$('.wizApplies').forEach(function(c){c.checked=false});
+  $('#wizProvider').value='ollama';wizCloudNote();
   fetch((endpoint||'')+'/config').then(function(r){return r.json()}).then(function(d){
     var llm=(d.config&&d.config.llm)||{};
     if(llm.provider)$('#wizProvider').value=llm.provider;
     if(llm.model)$('#wizModel').value=llm.model;
+    wizCloudNote();
   }).catch(function(){});
   wizShow(1);$('#wiz').hidden=false;
+}
+function wizCloudNote(){$('#wizCloudNote').hidden=$('#wizProvider').value!=='claude';
 }
 function wizCheckNewTag(){
   var canon=(DATA&&DATA.tag_canon)||[];var v=$('#wizTag').value.trim().toLowerCase();
@@ -934,18 +940,25 @@ function wizFind(){
   }).catch(function(){btn.disabled=false;btn.textContent='Find matches';$('#wizErr1').textContent='Server unreachable.'});
 }
 function wizRenderMatches(d){
+  // Large result sets arrive UNCHECKED so a noisy model can't be rubber-stamped;
+  // small sets stay checked for convenience. Either way you confirm each.
+  var preCheck=d.matches.length<=25;
   var note=d.matches.length+' of '+d.corpus_size+' entries matched via '+esc(d.model)+
     (d.sent<d.corpus_size?(' ('+d.sent+' sent to the model)'):'')+
-    '. Untick any that don’t belong, then apply.';
+    (preCheck?'. Untick any that don’t belong, then apply.':'. Review and tick the ones to tag (large result — none pre-selected).');
   $('#wizMatchInfo').innerHTML=note+(d.warnings.length?(' <span class="res-bad">'+esc(d.warnings.join(' ')) +'</span>'):'');
   if(!d.matches.length){$('#wizMatches').innerHTML='<div class="empty">No matches. Go back and refine the description.</div>';}
   else{
-    $('#wizMatches').innerHTML=d.matches.map(function(m){
-      return '<label class="wizrow"><input type="checkbox" class="wizPick" checked value="'+esc(m.uid)+'">'+
+    var head='<div class="wizrow" style="background:var(--surface-1,transparent)"><span style="flex:1" class="muted">'+
+      '<a href="#" id="wizAll">select all</a> · <a href="#" id="wizNone">none</a></span></div>';
+    $('#wizMatches').innerHTML=head+d.matches.map(function(m){
+      return '<label class="wizrow"><input type="checkbox" class="wizPick"'+(preCheck?' checked':'')+' value="'+esc(m.uid)+'">'+
         '<span class="mono">'+esc(m.id)+'</span>'+
         '<span style="flex:1">'+esc(m.summary)+'</span>'+
         '<span class="muted">'+esc(m.project==='global'?'global':m.project)+'</span></label>';
     }).join('');
+    $('#wizAll').addEventListener('click',function(ev){ev.preventDefault();$$('.wizPick').forEach(function(c){c.checked=true})});
+    $('#wizNone').addEventListener('click',function(ev){ev.preventDefault();$$('.wizPick').forEach(function(c){c.checked=false})});
   }
   wizShow(2);
 }
@@ -1021,6 +1034,7 @@ $('#tagHelpBtn').addEventListener('click',openWizard);
 $('#wizClose').addEventListener('click',function(){$('#wiz').hidden=true});
 $('#wiz').addEventListener('click',function(ev){if(ev.target===$('#wiz'))$('#wiz').hidden=true});
 $('#wizTag').addEventListener('input',wizCheckNewTag);
+$('#wizProvider').addEventListener('change',wizCloudNote);
 $('#wizFind').addEventListener('click',wizFind);
 $('#wizBack').addEventListener('click',function(){wizShow(1)});
 $('#wizApply').addEventListener('click',wizApply);
