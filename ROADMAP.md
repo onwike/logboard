@@ -11,6 +11,48 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v2.00.00 — Tagging help + application self-logging (2026-07-16)
+
+**Major** — Tagging help introduces an optional local-LLM dependency and hands entry
+text to a model, softening the founding "offline / zero-dependency" invariant to
+"your data stays in tools you control." That invariant change is what makes this a
+major bump.
+
+**Shipped:**
+- **Tagging help** — an LLM-assisted bulk-tagging wizard with a mandatory human
+  confirmation gate. Describe the entries to tag + a scope (log types, projects,
+  sessions); a **local** model (`claude -p` or Ollama, chosen in settings) returns
+  matching IDs; the server intersects them with the real corpus (a hallucinated id
+  can never reach a register) and shows them for review; you untick false positives
+  and confirm, then the tag — and, if new, its canon line — is written through the
+  existing guarded editor. The model receives `{id, summary, cause, fix}` only, never
+  file paths.
+- **Application self-logging** — logboard captures its own server exceptions and
+  client-side JS errors into a gitignored `app-errors.md` (a fifth `app_error` log
+  type) and surfaces them in a dedicated App-health panel, kept out of the
+  four-register analytics.
+
+**Quality level:** _to be recorded from the certification run before tagging._
+Gates: `test_logboard.py` (45 tests incl. mocked-model suggest/apply, ID-intersection,
+no-paths-to-model, self-log dedupe, server-exception→clean-500); `serve.py --check`;
+browser-verified both features in light and dark (full wizard describe→confirm→apply
+against fixtures, new-canon creation, App-health from real triggered errors).
+
+**Why an LLM path (vs deterministic bulk-apply):** the dashboard already supports
+lexical filtering (search, `#tag=`, the filterable table), and a "bulk-apply this tag
+to the filtered rows" action would tag most keyword-shaped classes (`network`, `config`,
+`csp`, …) with zero model exposure and full reproducibility. Tagging help exists for the
+case that plain filtering can't reach: grouping entries that share a *concept* but no
+token (e.g. clock-skew, off-by-one, and space-form-datetime bugs all under `datetime`).
+The default Ollama provider keeps that semantic matching offline. A deterministic
+filter-and-bulk-apply action, and persisting a Tagging-help run as a re-runnable rule so
+recurring debt isn't re-solved each cycle, are the obvious next steps.
+
+**Carried forward:** deterministic filter-and-bulk-apply + re-runnable tag rules (the
+invariant-preserving path for keyword-shaped tags); JSONL self-log (a lighter, safer
+write path than the current markdown-grammar reuse); cloud LLM providers with API keys
+(behind a loud warning) — all deferred to future opt-in minors.
+
 ## v1.01.03 — chart axis labels + table pagination (2026-07-16)
 
 **Shipped:** every chart now carries x and y axis labels — the trend and tagging-debt

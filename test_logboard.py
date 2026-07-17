@@ -188,13 +188,15 @@ class TempConfigMixin(object):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="logboard-test-")
         self.cfg, self.paths = build_fixtures(self.tmp)
-        self._saved = (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH)
+        self._saved = (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH, serve.APP_LOG)
         serve.CONFIG_PATH = os.path.join(self.tmp, "roots.json")
         serve.AUDIT_LOG = os.path.join(self.tmp, "tag-edits.log")
         serve.INDEX_PATH = os.path.join(HERE, "index.html")
+        serve.APP_LOG = os.path.join(self.tmp, "app-errors.md")
 
     def tearDown(self):
-        serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH = self._saved
+        (serve.CONFIG_PATH, serve.AUDIT_LOG, serve.INDEX_PATH,
+         serve.APP_LOG) = self._saved
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def write_config(self, cfg=None):
@@ -338,6 +340,121 @@ class ConfigValidationTests(TempConfigMixin, unittest.TestCase):
         self.assertEqual(serve.find_register_file(self.cfg, "global:Q01"), (None, None))
 
 
+class AppErrorTests(TempConfigMixin, unittest.TestCase):
+
+    def test_append_dedupe_and_parse(self):
+        serve.log_app_error("server", "ValueError in GET /x: boom", "trace\nline")
+        serve.log_app_error("server", "ValueError in GET /x: boom", "trace again")
+        serve.log_app_error("client", "TypeError at app.js:42")
+        es = serve.parse_app_errors()
+        self.assertEqual(len(es), 2)
+        by_src = dict((e["category"], e) for e in es)
+        self.assertEqual(by_src["server"]["count"], 2)
+        self.assertEqual(len(by_src["server"]["occurrence_dates"]), 2)
+        self.assertEqual(by_src["client"]["count"], 1)
+        # a stack trace's newlines never leak into the summary heading
+        self.assertNotIn("\n", by_src["server"]["summary"])
+
+    def test_same_signature_different_source_not_merged(self):
+        serve.log_app_error("server", "shared message")
+        serve.log_app_error("client", "shared message")
+        self.assertEqual(len(serve.parse_app_errors()), 2)
+
+    def test_app_errors_excluded_from_main_entries(self):
+        self.write_config()
+        serve.log_app_error("server", "boom")
+        payload = serve.build_payload()
+        self.assertEqual(len(payload["app_errors"]), 1)
+        self.assertTrue(all(e["log_type"] != "app_error" for e in payload["entries"]))
+
+    def test_logging_never_raises(self):
+        # a non-writable APP_LOG dir must not propagate an exception
+        serve.APP_LOG = os.path.join(self.tmp, "no-such-dir", "app-errors.md")
+        try:
+            serve.log_app_error("server", "boom")  # must swallow
+        except Exception as exc:
+            self.fail("log_app_error raised: %s" % exc)
+
+
+class TaggingHelpTests(TempConfigMixin, unittest.TestCase):
+    """Feature 1 backend, with the model mocked — the suite never calls a real LLM."""
+
+    def setUp(self):
+        super(TaggingHelpTests, self).setUp()
+        self._orig_model = serve.run_model
+
+    def tearDown(self):
+        serve.run_model = self._orig_model
+        super(TaggingHelpTests, self).tearDown()
+
+    def mock_model(self, returns):
+        self.captured_prompt = {}
+
+        def fake(provider, model, prompt, timeout=120):
+            self.captured_prompt["p"] = prompt
+            return returns
+        serve.run_model = fake
+
+    def test_extract_id_list_tolerant_and_last_wins(self):
+        self.assertEqual(serve.extract_id_list('["E01","E02"]'), ["E01", "E02"])
+        self.assertEqual(serve.extract_id_list('here: ["E01"] ok'), ["E01"])
+        self.assertEqual(serve.extract_id_list("```json\n[\"M01\"]\n```"), ["M01"])
+        self.assertEqual(serve.extract_id_list("none"), [])
+        self.assertEqual(serve.extract_id_list("[bad"), [])
+        # a model that echoes the prompt example then answers: last array wins
+        self.assertEqual(serve.extract_id_list('example ["E12","CE03"] answer: ["E01"]'), ["E01"])
+
+    def test_suggest_intersects_on_uid_and_drops_invented(self):
+        self.mock_model('["global:E01","GHOST-999"]')
+        r = serve.tag_suggest(self.cfg, {"log_types": ["tool_error"]},
+                              "anything", "mock", "")
+        uids = [m["uid"] for m in r["matches"]]
+        self.assertIn("global:E01", uids)
+        self.assertNotIn("GHOST-999", uids)
+        # the model is sent uids, not bare ids (so cross-project C01 can't collide)
+        self.assertIn("global:E01", self.captured_prompt["p"])
+
+    def test_suggest_no_cross_project_collision(self):
+        # two projects each with a C01; the model returning one uid tags only that one
+        r2 = os.path.join(self.tmp, "project-b")
+        os.makedirs(r2)
+        with open(os.path.join(r2, "corrections.md"), "w", encoding="utf-8") as fh:
+            fh.write(F(u"|## Details\n|\n|### C01 — a different belief\n|- **Lane:** X\n"
+                       u"|- **Trigger:** self\n|- **Wrong:** w\n|- **Correction:** c\n"
+                       u"|- **Date:** 2026-07-05 10:00 EDT\n"))
+        cfg = dict(self.cfg, project_roots=[self.cfg["project_roots"][0], r2])
+        self.mock_model('["project-a:C01"]')
+        r = serve.tag_suggest(cfg, {"log_types": ["correction"]}, "x", "mock", "")
+        uids = [m["uid"] for m in r["matches"]]
+        self.assertEqual(uids, ["project-a:C01"])  # NOT project-b:C01
+
+    def test_suggest_sends_no_paths_to_model(self):
+        self.mock_model("[]")
+        serve.tag_suggest(self.cfg, {}, "x", "mock", "")
+        prompt = self.captured_prompt["p"]
+        self.assertNotIn(self.tmp, prompt)          # no temp path
+        self.assertNotIn("source_log", prompt)
+        self.assertNotIn(".md", prompt)
+
+    def test_suggest_scope_limits_corpus(self):
+        self.mock_model("[]")
+        r = serve.tag_suggest(self.cfg, {"log_types": ["miscalculation"]}, "x", "mock", "")
+        self.assertEqual(r["corpus_size"], 1)       # only M01 in the fixture
+
+    def test_append_canon_tag_valid_dup_and_bad(self):
+        ok, msg = serve.append_canon_tag(self.cfg, "deploy", ["E", "C"], "shipping issues")
+        self.assertTrue(ok)
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        self.assertIn("deploy", [t["tag"] for t in tags])
+        ok, msg = serve.append_canon_tag(self.cfg, "deploy", ["E"], "again")
+        self.assertTrue(ok)
+        self.assertEqual(msg, "already in canon")
+        ok, _ = serve.append_canon_tag(self.cfg, "Bad Tag!", ["E"], "x")
+        self.assertFalse(ok)
+        ok, _ = serve.append_canon_tag(self.cfg, "ok", ["Z"], "x")
+        self.assertFalse(ok)
+
+
 class EditTagsTests(TempConfigMixin, unittest.TestCase):
 
     def read(self, key):
@@ -460,6 +577,105 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
         self.assertEqual(status, 404)
         status, _, _ = self.req("/nope", data={"x": 1})
         self.assertEqual(status, 404)
+
+    def test_log_error_endpoint_and_origin_gate(self):
+        status, _, body = self.req("/log-error", data={"message": "TypeError x",
+                                                       "source": "client", "stack": "at f"})
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        self.assertEqual(len(serve.parse_app_errors()), 1)
+        # cross-origin is refused (local-admin only)
+        status, _, _ = self.req("/log-error", data={"message": "x"},
+                                headers={"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        # missing message is a 400
+        status, _, _ = self.req("/log-error", data={"source": "client"})
+        self.assertEqual(status, 400)
+
+    def test_tag_suggest_and_apply_flow(self):
+        self.write_config()
+        orig = serve.run_model
+        serve.run_model = lambda p, m, prompt, timeout=120: '["global:CE02"]'
+        try:
+            status, _, body = self.req("/tag-suggest",
+                data={"description": "off-by-one bugs", "scope": {"log_types": ["coding_error"]},
+                      "model": {"provider": "mock"}})
+            d = json.loads(body)
+            self.assertEqual(status, 200)
+            self.assertTrue(d["ok"])
+            self.assertEqual([m["uid"] for m in d["matches"]], ["global:CE02"])
+        finally:
+            serve.run_model = orig
+        # apply a NEW canon tag to the confirmed uid
+        status, _, body = self.req("/tag-apply",
+            data={"tag": "off-by-one", "applies_to": ["CE"], "definition": "fencepost errors",
+                  "uids": ["global:CE02"]})
+        d = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(d["applied"], 1)
+        self.assertEqual(d["canon"]["message"], "added to canon")
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        self.assertIn("off-by-one", [t["tag"] for t in tags])
+        # re-applying is a no-op
+        status, _, body = self.req("/tag-apply",
+            data={"tag": "off-by-one", "uids": ["global:CE02"]})
+        self.assertEqual(json.loads(body)["applied"], 0)
+
+    def test_tag_endpoints_origin_gated(self):
+        self.write_config()
+        for path in ("/tag-suggest", "/tag-apply"):
+            status, _, _ = self.req(path, data={"description": "x", "tag": "y", "uids": []},
+                                    headers={"Origin": "https://evil.example"})
+            self.assertEqual(status, 403, path)
+
+    def test_config_post_origin_gated(self):
+        # a cross-origin page must not be able to CSRF a config write
+        os.remove(serve.CONFIG_PATH) if os.path.exists(serve.CONFIG_PATH) else None
+        status, _, _ = self.req("/config", data=self.cfg,
+                                headers={"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertFalse(os.path.exists(serve.CONFIG_PATH))
+        # a same-origin (localhost) request still works
+        status, _, _ = self.req("/config", data=self.cfg,
+                                headers={"Origin": "http://127.0.0.1:%d" % self.port})
+        self.assertEqual(status, 200)
+        self.assertTrue(os.path.exists(serve.CONFIG_PATH))
+
+    def test_model_error_surfaced_not_500(self):
+        self.write_config()
+        orig = serve.run_model
+
+        def boom(p, m, prompt, timeout=120):
+            raise serve.ModelError("Ollama unreachable")
+        serve.run_model = boom
+        try:
+            status, _, body = self.req("/tag-suggest",
+                data={"description": "x", "model": {"provider": "ollama"}})
+        finally:
+            serve.run_model = orig
+        self.assertEqual(status, 200)
+        d = json.loads(body)
+        self.assertFalse(d["ok"])
+        self.assertIn("Ollama", d["message"])
+
+    def test_server_exception_becomes_clean_500_and_is_logged(self):
+        # force a route body to throw; the guard must log it and return a
+        # clean 500 with no traceback leaked to the client.
+        orig = serve.build_payload
+
+        def boom():
+            raise RuntimeError("kaboom-secret-internal-detail")
+        serve.build_payload = boom
+        try:
+            status, _, body = self.req("/data.json")
+        finally:
+            serve.build_payload = orig
+        self.assertEqual(status, 500)
+        self.assertNotIn(b"kaboom-secret-internal-detail", body)
+        self.assertNotIn(b"Traceback", body)
+        errs = serve.parse_app_errors()
+        self.assertTrue(any(e["category"] == "server" and "RuntimeError" in e["summary"]
+                            for e in errs))
 
     def test_tags_endpoint_and_origin_gate(self):
         self.write_config()
