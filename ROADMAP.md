@@ -11,6 +11,18 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v2.00.01 — fix stuck Tagging-help modal (2026-07-17)
+
+**Patch.** The `#wiz` modal set `display:flex` unconditionally in CSS, which overrides
+the `[hidden]` attribute — so v2.00.00 shipped it visible on every cold load with a dead
+close button (CE45). Scoped the display to `#wiz:not([hidden])` so `[hidden]` governs
+visibility; added a static frontend guard test. The escape happened because the cert and
+tests checked the `.hidden` property, not the cold-load computed `display` (C86).
+
+**Quality level:** untiered patch. Gates: 48 tests (incl. the new frontend guard);
+`serve.py --check` green; browser-verified `getComputedStyle` none/flex/none on
+load/open/close.
+
 ## v2.00.00 — Tagging help + application self-logging (2026-07-16)
 
 **Major** — Tagging help introduces an optional local-LLM dependency and hands entry
