@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -68,6 +69,9 @@ ALLOWED_KEYS = {"global_logs", "project_roots", "tags_file", "allowed_origins",
 
 SUGGEST_CORPUS_CAP = 400  # max entries sent to the model per run
 APP_LOG_CAP = 512 * 1024  # stop growing app-errors.md past this (best-effort log)
+APP_LOG_MAX_OCCURRENCES = 50  # cap the Occurrences line per app-error signature
+MODEL_MAX_CONCURRENCY = 3     # bound in-flight model calls (threaded server)
+_MODEL_SEM = threading.BoundedSemaphore(MODEL_MAX_CONCURRENCY)
 
 
 def expand(p):
@@ -609,7 +613,14 @@ def log_app_error(source, message, stack=None):
                             break
                         om = FIELD_RE.match(lines[j])
                         if om and om.group(1).strip() == "Occurrences":
-                            lines[j] = lines[j] + "; " + ts
+                            # Bound the line: keep the first occurrence and the
+                            # most recent (MAX-1) so a hot signature can't grow it
+                            # without limit.
+                            segs = om.group(2).split(";")
+                            segs.append(" " + ts)
+                            if len(segs) > APP_LOG_MAX_OCCURRENCES:
+                                segs = segs[:1] + segs[-(APP_LOG_MAX_OCCURRENCES - 1):]
+                            lines[j] = "- **Occurrences:**" + ";".join(segs)
                             break
                     candidate = "\n".join(lines)
                 else:
@@ -650,7 +661,18 @@ class ModelError(Exception):
 
 
 def run_model(provider, model, prompt, timeout=120):
-    """Call a local model, return its raw text. Raises ModelError on failure."""
+    """Call a local model, return its raw text. Raises ModelError on failure.
+    Bounded concurrency so a burst of /tag-suggest can't pile up threads and
+    subprocesses without limit."""
+    if not _MODEL_SEM.acquire(blocking=False):
+        raise ModelError("too many model calls in flight; try again in a moment")
+    try:
+        return _run_model_locked(provider, model, prompt, timeout)
+    finally:
+        _MODEL_SEM.release()
+
+
+def _run_model_locked(provider, model, prompt, timeout):
     if provider == "claude":
         try:
             import subprocess
@@ -770,12 +792,14 @@ def append_canon_tag(cfg, tag, applies_to, definition):
     if not applies or any(a not in ("E", "CE", "C", "M") for a in applies):
         return False, "applies_to must be a non-empty subset of E, CE, C, M"
     definition = re.sub(r"[\t\n]+", " ", (definition or "").strip()) or "(no definition)"
-    existing, _ = parse_canon(tf)
-    if any(t["tag"] == tag for t in existing):
-        return True, "already in canon"
     with open(tf + ".lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
         try:
+            # Dup-check INSIDE the lock — otherwise two concurrent appends of the
+            # same new tag both pass a pre-lock check and write duplicate lines.
+            existing, _ = parse_canon(tf)
+            if any(t["tag"] == tag for t in existing):
+                return True, "already in canon"
             with open(tf, encoding="utf-8") as fh:
                 text = fh.read()
             if not text.endswith("\n"):
@@ -921,6 +945,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?", 1)[0]
         if path == "/config":
+            # Local-admin only, like every other mutating endpoint — otherwise a
+            # cross-origin page could CSRF a config write and grant itself read
+            # access to the whole corpus.
+            if not self._local_origin():
+                self._send(403, {"errors": ["config editing is local-admin only"]})
+                return
             cfg = self._read_json_body()
             if cfg is None:
                 self._send(400, {"errors": ["body must be JSON (max 64 KB)"]})
@@ -1026,7 +1056,9 @@ class Handler(BaseHTTPRequestHandler):
                 results.append({"uid": uid, "ok": ok, "message": msg})
                 if ok and msg != "no change":
                     applied += 1
-            self._send(200, {"ok": True, "applied": applied, "canon": canon_result,
+            # ok reflects the actual edits, not just that the request was handled.
+            overall = all(r["ok"] for r in results) if results else False
+            self._send(200, {"ok": overall, "applied": applied, "canon": canon_result,
                              "results": results})
         else:
             self._send(404, {"error": "not found"})

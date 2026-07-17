@@ -628,6 +628,19 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
                                     headers={"Origin": "https://evil.example"})
             self.assertEqual(status, 403, path)
 
+    def test_config_post_origin_gated(self):
+        # a cross-origin page must not be able to CSRF a config write
+        os.remove(serve.CONFIG_PATH) if os.path.exists(serve.CONFIG_PATH) else None
+        status, _, _ = self.req("/config", data=self.cfg,
+                                headers={"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertFalse(os.path.exists(serve.CONFIG_PATH))
+        # a same-origin (localhost) request still works
+        status, _, _ = self.req("/config", data=self.cfg,
+                                headers={"Origin": "http://127.0.0.1:%d" % self.port})
+        self.assertEqual(status, 200)
+        self.assertTrue(os.path.exists(serve.CONFIG_PATH))
+
     def test_model_error_surfaced_not_500(self):
         self.write_config()
         orig = serve.run_model
