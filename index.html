@@ -6,11 +6,11 @@
 <title>Error observatory — logboard</title>
 <style>
 :root{
-  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#6d6b66;
   --grid:#e1e0d9; --hair:rgba(11,11,11,.10); --axis:#c3c2b7;
   --s-tool:#2a78d6; --s-coding:#1baf7a; --s-corr:#eda100; --s-misc:#008300;
   --emph:#2a78d6; --rest:#d6d5cd; --debt:#898781; --seq:#5598e7;
-  --good:#0ca30c; --bad:#d03b3b;
+  --good:#006300; --bad:#c0392b;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -19,6 +19,7 @@
     --s-tool:#3987e5; --s-coding:#199e70; --s-corr:#c98500; --s-misc:#008300;
     --emph:#3987e5; --rest:#383835; --seq:#5598e7;
     --good:#0ca30c; --bad:#e66767;
+    --muted:#898781;
   }
 }
 *{box-sizing:border-box}
@@ -65,6 +66,8 @@ header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
 .pager button:disabled{opacity:.4;cursor:default}
 #tblframe{max-height:620px;overflow:auto}
 #tblframe thead th{position:sticky;top:0;background:var(--surface);z-index:1}
+#appHealth{overflow-x:auto}
+#setup .frow{flex-wrap:wrap}
 .seg{display:flex;gap:2px;min-width:0}
 .hbar{height:13px;border-radius:3px;min-width:2px}
 table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
@@ -86,7 +89,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:inherit}
 #setup .frow{display:flex;gap:8px;align-items:center;margin:8px 0}
 #setup input[type=text]{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 #setup .lab{width:170px;flex:none;font-size:13px;color:var(--ink2)}
-.res-ok{color:var(--ink2)} .res-bad{color:#c0392b}
+.res-ok{color:var(--ink2)} .res-bad{color:var(--bad)}
 a{color:var(--ink2)}
 #wiz{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 16px}
 .wizcard{background:var(--surface);border:1px solid var(--hair);border-radius:12px;padding:18px 20px;width:100%;max-width:720px}
@@ -123,19 +126,19 @@ a{color:var(--ink2)}
   <h2 id="setupTitle">Set up logboard</h2>
   <p class="sub">Point the dashboard at your register files. Paths stay on this machine, saved to
      <span class="mono">roots.json</span> next to serve.py (never committed to git).</p>
-  <div class="frow"><span class="lab">Tool error log</span><input type="text" id="cfgTool" placeholder="~/logs/ToolErrorLog.md"></div>
-  <div class="frow"><span class="lab">Coding error log</span><input type="text" id="cfgCoding" placeholder="~/logs/CodingErrorLog.md"></div>
+  <div class="frow"><span class="lab">Tool error log</span><input type="text" id="cfgTool" aria-label="Tool error log path" placeholder="~/logs/ToolErrorLog.md"></div>
+  <div class="frow"><span class="lab">Coding error log</span><input type="text" id="cfgCoding" aria-label="Coding error log path" placeholder="~/logs/CodingErrorLog.md"></div>
   <div id="cfgRoots"></div>
   <div class="frow"><span class="lab"></span><button id="addRoot">Add project root</button></div>
-  <div class="frow"><span class="lab">Tag canon file (optional)</span><input type="text" id="cfgTags" placeholder="~/logs/tags.txt"></div>
+  <div class="frow"><span class="lab">Tag canon file (optional)</span><input type="text" id="cfgTags" aria-label="Tag canon file path" placeholder="~/logs/tags.txt"></div>
   <div class="frow"><span class="lab">Tagging-help model</span>
-    <select id="cfgProvider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud model, via your CLI)</option></select>
-    <input type="text" id="cfgModel" placeholder="ollama model, e.g. llama3.1:8b" style="flex:1;min-width:140px">
+    <select id="cfgProvider" aria-label="Tagging-help model provider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud model, via your CLI)</option></select>
+    <input type="text" id="cfgModel" aria-label="Ollama model name" placeholder="ollama model, e.g. llama3.1:8b" style="flex:1;min-width:140px">
   </div>
   <p class="muted">Tagging Help sends entry text (summary, cause, fix — never file paths) to the model you pick.
      <b>Ollama</b> runs fully offline on this machine. <b>claude -p</b> runs through your local CLI but sends that
      text to <b>Anthropic's cloud</b> (your own subscription). logboard itself holds no API key and calls no cloud service directly.</p>
-  <div class="frow"><span class="lab">Data endpoint (this browser)</span><input type="text" id="cfgEndpoint" placeholder="same origin"></div>
+  <div class="frow"><span class="lab">Data endpoint (this browser)</span><input type="text" id="cfgEndpoint" aria-label="Data endpoint" placeholder="same origin"></div>
   <p class="muted">The endpoint is a per-browser setting (saved locally) for pointing a remotely
      hosted copy of this page at your local data server. Leave blank when served by serve.py itself.</p>
   <div class="frow"><span class="lab"></span><button id="saveCfg" style="font-weight:600">Save and load</button></div>
@@ -242,40 +245,40 @@ a{color:var(--ink2)}
 </main>
 
 <div id="wiz" hidden>
-  <div class="wizcard">
+  <div class="wizcard" role="dialog" aria-modal="true" aria-labelledby="wizTitle">
     <div class="wizhead">
-      <h2 id="wizTitle">Tagging help</h2>
+      <h2 id="wizTitle">Tagging help · describe</h2>
       <button id="wizClose" title="Close" aria-label="Close">✕</button>
     </div>
 
     <div id="wizStep1" class="wizbody">
       <p class="muted">Describe the entries you want tagged. A local model proposes matches; you confirm before anything is written.</p>
-      <div class="frow"><span class="lab">Tag</span><input type="text" id="wizTag" list="wizTagList" placeholder="e.g. datetime">
+      <div class="frow"><span class="lab">Tag</span><input type="text" id="wizTag" list="wizTagList" placeholder="e.g. datetime" aria-label="Tag to apply">
         <datalist id="wizTagList"></datalist></div>
       <div id="wizNewTag" hidden>
-        <div class="frow"><span class="lab">New tag — applies to</span>
+        <div class="frow" role="group" aria-label="New tag applies to which registers"><span class="lab">New tag — applies to</span>
           <label class="ck"><input type="checkbox" value="E" class="wizApplies">Tool (E)</label>
           <label class="ck"><input type="checkbox" value="CE" class="wizApplies">Coding (CE)</label>
           <label class="ck"><input type="checkbox" value="C" class="wizApplies">Corrections (C)</label>
           <label class="ck"><input type="checkbox" value="M" class="wizApplies">Miscalc (M)</label>
         </div>
-        <div class="frow"><span class="lab">Definition</span><input type="text" id="wizDef" placeholder="one-line meaning for the canon"></div>
+        <div class="frow"><span class="lab">Definition</span><input type="text" id="wizDef" placeholder="one-line meaning for the canon" aria-label="Tag definition"></div>
       </div>
-      <div class="frow"><span class="lab">Search in</span>
+      <div class="frow" role="group" aria-label="Which registers to search"><span class="lab">Search in</span>
         <label class="ck"><input type="checkbox" value="tool_error" class="wizType">Tool</label>
         <label class="ck"><input type="checkbox" value="coding_error" class="wizType">Coding</label>
         <label class="ck"><input type="checkbox" value="correction" class="wizType">Corrections</label>
         <label class="ck"><input type="checkbox" value="miscalculation" class="wizType">Miscalc</label>
         <span class="muted">(none = all)</span>
       </div>
-      <div class="frow"><span class="lab">Projects</span><select id="wizProj" multiple size="3" style="flex:1;min-width:160px"></select></div>
-      <div class="frow"><span class="lab">Sessions</span><input type="text" id="wizSess" placeholder="sid substrings, comma-separated (matched in evidence)"></div>
-      <div class="frow"><span class="lab">Describe</span><textarea id="wizDesc" rows="3" placeholder="anything about timezone or UTC/local parsing drift" style="flex:1;min-width:200px"></textarea></div>
+      <div class="frow"><span class="lab">Projects</span><select id="wizProj" multiple size="3" aria-label="Limit to projects" style="flex:1;min-width:160px"></select></div>
+      <div class="frow"><span class="lab">Sessions</span><input type="text" id="wizSess" placeholder="sid substrings, comma-separated (matched in evidence)" aria-label="Limit to sessions"></div>
+      <div class="frow"><span class="lab">Describe</span><textarea id="wizDesc" rows="3" placeholder="anything about timezone or UTC/local parsing drift" aria-label="Describe which entries to tag" style="flex:1;min-width:200px"></textarea></div>
       <div class="frow"><span class="lab">Model</span>
-        <select id="wizProvider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud, via CLI)</option></select>
-        <input type="text" id="wizModel" placeholder="ollama model (optional)" style="flex:1;min-width:120px">
+        <select id="wizProvider" aria-label="Model provider"><option value="ollama">Ollama (offline)</option><option value="claude">claude -p (cloud, via CLI)</option></select>
+        <input type="text" id="wizModel" placeholder="ollama model (optional)" aria-label="Ollama model name" style="flex:1;min-width:120px">
       </div>
-      <div class="frow"><span class="lab"></span><span id="wizCloudNote" class="muted" hidden>⚠ claude -p sends the in-scope entry text to Anthropic. Pick Ollama to keep it fully on this machine.</span></div>
+      <div class="frow"><span class="lab"></span><span id="wizCloudNote" hidden style="color:var(--bad);font-weight:500">⚠ claude -p sends the in-scope entry text to Anthropic. Pick Ollama to keep it fully on this machine.</span></div>
       <div class="frow"><span class="lab"></span><button id="wizFind" style="font-weight:600">Find matches</button><span id="wizErr1" class="res-bad" style="margin-left:8px"></span></div>
     </div>
 
@@ -530,8 +533,8 @@ function stackedSvg(buckets,series,H,xlabel,ylabel){
     h+='<rect x="'+(padL+i*step)+'" y="'+padT+'" width="'+step.toFixed(1)+'" height="'+innerH+'" fill="transparent" data-i="'+i+'"/>';
   });
   h+='<line x1="'+padL+'" y1="'+(padT+innerH)+'" x2="'+W+'" y2="'+(padT+innerH)+'" stroke="var(--axis)" stroke-width="1"/>';
-  if(ylabel)h+='<text x="'+(14)+'" y="'+(padT+innerH/2)+'" text-anchor="middle" transform="rotate(-90 14 '+(padT+innerH/2)+')" fill="var(--text-secondary)">'+esc(ylabel)+'</text>';
-  if(xlabel)h+='<text x="'+(padL+innerW/2)+'" y="'+(H-3)+'" text-anchor="middle" fill="var(--text-secondary)">'+esc(xlabel)+'</text>';
+  if(ylabel)h+='<text x="'+(14)+'" y="'+(padT+innerH/2)+'" text-anchor="middle" transform="rotate(-90 14 '+(padT+innerH/2)+')" fill="var(--ink2)">'+esc(ylabel)+'</text>';
+  if(xlabel)h+='<text x="'+(padL+innerW/2)+'" y="'+(H-3)+'" text-anchor="middle" fill="var(--ink2)">'+esc(xlabel)+'</text>';
   h+='</svg>';
   return h;
 }
@@ -868,7 +871,7 @@ function renderAppHealth(){
   var errs=(DATA&&DATA.app_errors)||[];
   var badge=$('#appHealthCount');
   badge.textContent=errs.length?(errs.length+' error'+(errs.length===1?'':'s')):'clean';
-  badge.style.color=errs.length?'var(--debt)':'var(--good)';
+  badge.style.color=errs.length?'var(--bad)':'var(--good)';
   if(!errs.length){$('#appHealth').innerHTML='<div class="empty">No application errors logged. logboard is healthy.</div>';return}
   var h='<table><colgroup><col style="width:70px"><col style="width:80px"><col><col style="width:150px"><col style="width:58px"></colgroup>'+
     '<thead><tr><th>ID</th><th>Source</th><th>Error</th><th>Last seen</th><th>Count</th></tr></thead><tbody>';
@@ -895,7 +898,9 @@ function renderAppHealth(){
 /* ---------- Tagging Help wizard ---------- */
 function wizShow(step){
   $('#wizStep1').hidden=step!==1;$('#wizStep2').hidden=step!==2;$('#wizStep3').hidden=step!==3;
+  $('#wizTitle').textContent='Tagging help · '+({1:'describe',2:'review',3:'done'}[step]);
 }
+var wizReturnFocus=null;
 function openWizard(){
   var canon=(DATA&&DATA.tag_canon)||[];
   $('#wizTagList').innerHTML=canon.map(function(t){return '<option value="'+esc(t.tag)+'">'+esc(t.definition)+'</option>'}).join('');
@@ -912,7 +917,10 @@ function openWizard(){
     wizCloudNote();
   }).catch(function(){});
   wizShow(1);$('#wiz').hidden=false;
+  wizReturnFocus=document.activeElement;
+  setTimeout(function(){$('#wizTag').focus()},0);
 }
+function closeWizard(){$('#wiz').hidden=true;if(wizReturnFocus&&wizReturnFocus.focus)wizReturnFocus.focus()}
 function wizCloudNote(){$('#wizCloudNote').hidden=$('#wizProvider').value!=='claude';
 }
 function wizCheckNewTag(){
@@ -922,6 +930,7 @@ function wizCheckNewTag(){
 }
 function wizFind(){
   $('#wizErr1').textContent='';
+  if(!$('#wizTag').value.trim()){$('#wizErr1').textContent='Enter a tag first.';return}
   var desc=$('#wizDesc').value.trim();
   if(!desc){$('#wizErr1').textContent='Describe what to tag.';return}
   var scope={
@@ -947,9 +956,10 @@ function wizRenderMatches(d){
     (d.sent<d.corpus_size?(' ('+d.sent+' sent to the model)'):'')+
     (preCheck?'. Untick any that don’t belong, then apply.':'. Review and tick the ones to tag (large result — none pre-selected).');
   $('#wizMatchInfo').innerHTML=note+(d.warnings.length?(' <span class="res-bad">'+esc(d.warnings.join(' ')) +'</span>'):'');
+  $('#wizApply').hidden=!d.matches.length;
   if(!d.matches.length){$('#wizMatches').innerHTML='<div class="empty">No matches. Go back and refine the description.</div>';}
   else{
-    var head='<div class="wizrow" style="background:var(--surface-1,transparent)"><span style="flex:1" class="muted">'+
+    var head='<div class="wizrow" style="background:var(--page)"><span style="flex:1" class="muted">'+
       '<a href="#" id="wizAll">select all</a> · <a href="#" id="wizNone">none</a></span></div>';
     $('#wizMatches').innerHTML=head+d.matches.map(function(m){
       return '<label class="wizrow"><input type="checkbox" class="wizPick"'+(preCheck?' checked':'')+' value="'+esc(m.uid)+'">'+
@@ -1031,14 +1041,15 @@ $('#addRoot').addEventListener('click',function(){$('#cfgRoots').appendChild(roo
 $('#saveCfg').addEventListener('click',saveSetup);
 $('#badge').addEventListener('click',function(){state.untagged=true;buildTagMenu();renderAll()});
 $('#tagHelpBtn').addEventListener('click',openWizard);
-$('#wizClose').addEventListener('click',function(){$('#wiz').hidden=true});
-$('#wiz').addEventListener('click',function(ev){if(ev.target===$('#wiz'))$('#wiz').hidden=true});
+$('#wizClose').addEventListener('click',closeWizard);
+$('#wiz').addEventListener('click',function(ev){if(ev.target===$('#wiz'))closeWizard()});
 $('#wizTag').addEventListener('input',wizCheckNewTag);
 $('#wizProvider').addEventListener('change',wizCloudNote);
 $('#wizFind').addEventListener('click',wizFind);
 $('#wizBack').addEventListener('click',function(){wizShow(1)});
 $('#wizApply').addEventListener('click',wizApply);
-$('#wizFinish').addEventListener('click',function(){$('#wiz').hidden=true});
+$('#wizFinish').addEventListener('click',closeWizard);
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&!$('#wiz').hidden)closeWizard()});
 document.addEventListener('keydown',function(ev){
   if(ev.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='SELECT'){
     ev.preventDefault();$('#q').focus();
