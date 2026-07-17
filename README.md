@@ -1,8 +1,8 @@
 # logboard
 
-A local dashboard over markdown issue registers — tool errors, coding errors, corrections, and miscalculations. One small Python server, one HTML page, no third-party services. Your log files stay on your machine.
+A local dashboard over markdown issue registers — tool errors, coding errors, corrections, and miscalculations. One small Python server, one HTML page, no cloud service of its own. Your registers stay on your machine — the one exception is the optional Tagging help feature, and only if you point it at a cloud model (see Privacy posture).
 
-I log every resolved tool failure, coding defect, corrected assumption, and numeric slip into running markdown registers, so a mistake paid for once is never paid for twice. logboard turns those files into trends, hot-spots, and a searchable console — and, optionally, uses a **local** language model to help bulk-tag entries.
+I log every resolved tool failure, coding defect, corrected assumption, and numeric slip into running markdown registers, so a mistake paid for once is never paid for twice. logboard turns those files into trends, hot-spots, and a searchable console — and, optionally, uses a language model (offline, or your own cloud CLI) to help bulk-tag entries.
 
 ![Dashboard in light mode — a live system with 259 entries; register text is redacted in the capture](docs/demo-light.png)
 
@@ -38,14 +38,14 @@ Everything re-parses on every request, so the page is always current — edit a 
 
 ## Tagging help (local, optional)
 
-Bulk-tagging with a human gate. Describe what you want tagged ("anything about timezone or UTC/local parsing drift"), pick a scope (log types, projects, sessions — empty means all), and a **local** model returns which entries match. You review the matches, untick any false positives, and confirm — only then is the tag written, through the same guarded single-line editor used everywhere else. A tag new to the canon is added (name + applies-to + definition) as part of the same confirmed step.
+Bulk-tagging with a human gate. Describe what you want tagged ("anything about timezone or UTC/local parsing drift"), pick a scope (log types, projects, sessions — empty means all), and the model returns which entries match. You review the matches, untick any false positives, and confirm — only then is the tag written, through the same guarded single-line editor used everywhere else. A tag new to the canon is added (name + applies-to + definition) as part of the same confirmed step.
 
-The model is **advisory**: it receives `{id, summary, cause, fix}` — never file paths — and returns only IDs, which the server intersects against the real corpus, so a hallucinated or injected id can never reach a register. Two local providers, chosen in settings:
+The model is **advisory**: it receives `{uid, summary, cause, fix}` — never file paths — and returns only IDs, which the server intersects against the real corpus, so a hallucinated or injected id can never reach a register. Two providers, chosen in settings:
 
-- `claude -p` — your own Claude Code CLI (uses your existing subscription; runs locally).
-- **Ollama** — fully offline (`http://127.0.0.1:11434`); name the model in settings.
+- **Ollama** — fully offline (`http://127.0.0.1:11434`); the corpus never leaves the machine. This is the default; name the model in settings.
+- `claude -p` — runs through your own Claude Code CLI, but the CLI sends the entry text to **Anthropic's cloud model** (on your subscription). Stronger matching, but the in-scope entry text leaves your machine — use it deliberately.
 
-No cloud API, no keys, no third-party endpoint. Match quality tracks the model — a small local model will be noisier, which is exactly what the confirmation step is for.
+logboard itself holds no API key and calls no cloud service directly; the only egress is whatever your chosen CLI/endpoint does. Match quality tracks the model — a small offline model will be noisier, which is exactly what the confirmation step is for.
 
 ## The register format
 
@@ -97,7 +97,7 @@ The frontend is one static file. Host `index.html` anywhere, open its settings p
 
 ## Privacy posture
 
-**Your data stays in tools you control.** Everything happens locally: the server binds 127.0.0.1, and the only "external" thing logboard can do is hand entry text to a **local** language model *you* configure for Tagging help — `claude -p` (your own CLI/subscription) or Ollama (fully offline). There is no cloud API, no third-party endpoint, and no API key anywhere in this tool. When you use Tagging help, the model receives `{id, summary, cause, fix}` for the in-scope entries — never file paths — and if you pick `claude -p`, that text goes to Anthropic through your own logged-in CLI exactly as any `claude -p` call would; if you pick Ollama, it never leaves the machine. Leave Tagging help unused and nothing is ever sent anywhere.
+**Your data stays in tools you control.** The server binds 127.0.0.1 and holds no API key; it never calls a cloud service directly. The only way any register content leaves your machine is if you use Tagging help *and* choose the `claude -p` provider — then your own logged-in CLI forwards the in-scope entries' `{uid, summary, cause, fix}` (never file paths) to Anthropic's cloud model, exactly as any `claude -p` call would. The default provider is **Ollama**, which runs fully offline and sends nothing anywhere. Leave Tagging help unused, or keep it on Ollama, and no register content ever leaves the machine.
 
 - The server binds 127.0.0.1 and rejects requests whose `Host` header doesn't name this machine (anti-DNS-rebinding; add a tunnel hostname to `allowed_hosts` in `roots.json` if you ever front it deliberately). It writes its own `roots.json`, its `tag-edits.log` journal, its gitignored `app-errors.md` (self-logged runtime errors), and — only through the tag editor or Tagging help — the `Tags` line of one register entry at a time plus, when you create one, a single new line in your tag canon: lock-guarded, written atomically, re-parsed after every write with automatic restore on any anomaly, and journaled (each edited file also gains a persistent `.lock` sibling and a transient `.logboard-tmp` during the write). Nothing else in a register is ever touched. Register writes are refused for cross-site origins even when `allowed_origins` grants read access.
 - This repo ships layered leak guards: a pre-commit hook that enforces the tracked-path allowlist, pre-commit and pre-push content scans that refuse any home-directory path or register entry heading (**opt-in per clone**: `git config core.hooksPath .githooks`), and a CI workflow that re-scans the full pushed history server-side. The patterns catch structure, not arbitrary prose — treat them as a net, not a proof.

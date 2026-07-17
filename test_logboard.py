@@ -395,20 +395,38 @@ class TaggingHelpTests(TempConfigMixin, unittest.TestCase):
             return returns
         serve.run_model = fake
 
-    def test_extract_id_list_tolerant(self):
+    def test_extract_id_list_tolerant_and_last_wins(self):
         self.assertEqual(serve.extract_id_list('["E01","E02"]'), ["E01", "E02"])
         self.assertEqual(serve.extract_id_list('here: ["E01"] ok'), ["E01"])
         self.assertEqual(serve.extract_id_list("```json\n[\"M01\"]\n```"), ["M01"])
         self.assertEqual(serve.extract_id_list("none"), [])
         self.assertEqual(serve.extract_id_list("[bad"), [])
+        # a model that echoes the prompt example then answers: last array wins
+        self.assertEqual(serve.extract_id_list('example ["E12","CE03"] answer: ["E01"]'), ["E01"])
 
-    def test_suggest_intersects_and_drops_invented_ids(self):
-        self.mock_model('["E01","GHOST-999"]')
+    def test_suggest_intersects_on_uid_and_drops_invented(self):
+        self.mock_model('["global:E01","GHOST-999"]')
         r = serve.tag_suggest(self.cfg, {"log_types": ["tool_error"]},
                               "anything", "mock", "")
-        ids = [m["id"] for m in r["matches"]]
-        self.assertIn("E01", ids)
-        self.assertNotIn("GHOST-999", ids)
+        uids = [m["uid"] for m in r["matches"]]
+        self.assertIn("global:E01", uids)
+        self.assertNotIn("GHOST-999", uids)
+        # the model is sent uids, not bare ids (so cross-project C01 can't collide)
+        self.assertIn("global:E01", self.captured_prompt["p"])
+
+    def test_suggest_no_cross_project_collision(self):
+        # two projects each with a C01; the model returning one uid tags only that one
+        r2 = os.path.join(self.tmp, "project-b")
+        os.makedirs(r2)
+        with open(os.path.join(r2, "corrections.md"), "w", encoding="utf-8") as fh:
+            fh.write(F(u"|## Details\n|\n|### C01 — a different belief\n|- **Lane:** X\n"
+                       u"|- **Trigger:** self\n|- **Wrong:** w\n|- **Correction:** c\n"
+                       u"|- **Date:** 2026-07-05 10:00 EDT\n"))
+        cfg = dict(self.cfg, project_roots=[self.cfg["project_roots"][0], r2])
+        self.mock_model('["project-a:C01"]')
+        r = serve.tag_suggest(cfg, {"log_types": ["correction"]}, "x", "mock", "")
+        uids = [m["uid"] for m in r["matches"]]
+        self.assertEqual(uids, ["project-a:C01"])  # NOT project-b:C01
 
     def test_suggest_sends_no_paths_to_model(self):
         self.mock_model("[]")
@@ -577,7 +595,7 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
     def test_tag_suggest_and_apply_flow(self):
         self.write_config()
         orig = serve.run_model
-        serve.run_model = lambda p, m, prompt, timeout=120: '["CE02"]'
+        serve.run_model = lambda p, m, prompt, timeout=120: '["global:CE02"]'
         try:
             status, _, body = self.req("/tag-suggest",
                 data={"description": "off-by-one bugs", "scope": {"log_types": ["coding_error"]},
@@ -585,7 +603,7 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
             d = json.loads(body)
             self.assertEqual(status, 200)
             self.assertTrue(d["ok"])
-            self.assertEqual([m["id"] for m in d["matches"]], ["CE02"])
+            self.assertEqual([m["uid"] for m in d["matches"]], ["global:CE02"])
         finally:
             serve.run_model = orig
         # apply a NEW canon tag to the confirmed uid

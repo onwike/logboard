@@ -38,8 +38,20 @@ no-paths-to-model, self-log dedupe, server-exception→clean-500); `serve.py --c
 browser-verified both features in light and dark (full wizard describe→confirm→apply
 against fixtures, new-canon creation, App-health from real triggered errors).
 
-**Carried forward:** cloud LLM providers (API keys, behind a loud warning) deferred to
-a future opt-in minor.
+**Why an LLM path (vs deterministic bulk-apply):** the dashboard already supports
+lexical filtering (search, `#tag=`, the filterable table), and a "bulk-apply this tag
+to the filtered rows" action would tag most keyword-shaped classes (`network`, `config`,
+`csp`, …) with zero model exposure and full reproducibility. Tagging help exists for the
+case that plain filtering can't reach: grouping entries that share a *concept* but no
+token (e.g. clock-skew, off-by-one, and space-form-datetime bugs all under `datetime`).
+The default Ollama provider keeps that semantic matching offline. A deterministic
+filter-and-bulk-apply action, and persisting a Tagging-help run as a re-runnable rule so
+recurring debt isn't re-solved each cycle, are the obvious next steps.
+
+**Carried forward:** deterministic filter-and-bulk-apply + re-runnable tag rules (the
+invariant-preserving path for keyword-shaped tags); JSONL self-log (a lighter, safer
+write path than the current markdown-grammar reuse); cloud LLM providers with API keys
+(behind a loud warning) — all deferred to future opt-in minors.
 
 ## v1.01.03 — chart axis labels + table pagination (2026-07-16)
 
