@@ -712,6 +712,27 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
         self.assertNotIn("Access-Control-Allow-Origin", headers)
 
 
+class FrontendTests(unittest.TestCase):
+    """Static guards on index.html — the suite has no browser, so these catch
+    the class of bug where a `hidden`-toggled element renders anyway."""
+
+    def setUp(self):
+        with open(os.path.join(HERE, "index.html"), encoding="utf-8") as fh:
+            self.html = fh.read()
+
+    def test_wiz_modal_display_respects_hidden(self):
+        # a CSS `display:` on #wiz would override the [hidden] attribute and the
+        # modal would show on load / never close (CE45). The display must be
+        # scoped to the visible state instead.
+        import re
+        base = re.search(r"#wiz\{([^}]*)\}", self.html)
+        self.assertIsNotNone(base, "#wiz base rule not found")
+        self.assertNotIn("display", base.group(1),
+                         "#wiz base rule must not set display (would override [hidden])")
+        self.assertIn("#wiz:not([hidden])", self.html,
+                      "#wiz visible-state display rule missing")
+
+
 class CliTests(unittest.TestCase):
     """--check / --audit / retro-tag.py exit codes, run against a copied app dir
     so the real repo's roots.json is never involved."""
