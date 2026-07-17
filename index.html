@@ -417,7 +417,7 @@ function openSetup(firstRun){
     $('#cfgCoding').value=gl.coding_error||'';
     $('#cfgTags').value=c.tags_file||'';
     var llm=c.llm||{};
-    $('#cfgProvider').value=llm.provider||'claude';
+    $('#cfgProvider').value=llm.provider||'ollama';
     $('#cfgModel').value=llm.model||'';
     var box=$('#cfgRoots');box.innerHTML='';
     ((c.project_roots&&c.project_roots.length)?c.project_roots:['']).forEach(function(r){box.appendChild(rootRow(r))});

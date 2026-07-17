@@ -929,10 +929,12 @@ class Handler(BaseHTTPRequestHandler):
             if errors:
                 self._send(400, {"errors": errors, "results": results})
                 return
-            # Config write: fixed path in this server's own directory. Atomic
-            # (tmp + os.replace) so a crash mid-write can't truncate the config.
-            tmp = CONFIG_PATH + ".logboard-tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
+            # Config write: atomic (unique tmp + os.replace). A per-write unique
+            # tmp name means two concurrent saves (threaded server) can't rename
+            # each other's tmp out from under them.
+            import tempfile
+            fd, tmp = tempfile.mkstemp(dir=BASE, prefix="roots.", suffix=".logboard-tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(cfg, fh, indent=2)
                 fh.write("\n")
             os.replace(tmp, CONFIG_PATH)
@@ -1184,7 +1186,8 @@ def main():
     if "--audit" in sys.argv:
         sys.exit(run_audit())
     # Threaded so a slow model call (up to 120s) doesn't stall the dashboard's
-    # own requests. All register writes are flock-guarded, so this is safe.
+    # own requests. Register/canon/app-log writes are flock-guarded and the config
+    # write uses a unique tmp + atomic rename, so concurrent requests are safe.
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     state = "present" if os.path.isfile(CONFIG_PATH) else "absent — open the page to set up"
     print("%s serving on http://127.0.0.1:%d (config %s)" % (APP, PORT, state))
