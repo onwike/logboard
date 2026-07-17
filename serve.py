@@ -616,11 +616,11 @@ def log_app_error(source, message, stack=None):
                             # Bound the line: keep the first occurrence and the
                             # most recent (MAX-1) so a hot signature can't grow it
                             # without limit.
-                            segs = om.group(2).split(";")
-                            segs.append(" " + ts)
+                            segs = [s.strip() for s in om.group(2).split(";") if s.strip()]
+                            segs.append(ts)
                             if len(segs) > APP_LOG_MAX_OCCURRENCES:
                                 segs = segs[:1] + segs[-(APP_LOG_MAX_OCCURRENCES - 1):]
-                            lines[j] = "- **Occurrences:**" + ";".join(segs)
+                            lines[j] = "- **Occurrences:** " + "; ".join(segs)
                             break
                     candidate = "\n".join(lines)
                 else:
