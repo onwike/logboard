@@ -335,6 +335,10 @@ def build_payload():
         # logboard's own errors — a separate population, never mixed into the
         # four-register analytics above.
         "app_errors": parse_app_errors(),
+        # tag-audit findings (untagged / off-canon / wrong-register) so the
+        # dashboard can drive resolution, not just display a count.
+        "audit": (compute_audit(cfg, entries, canon, canon_warnings)
+                  if configured else None),
     }
 
 
@@ -817,6 +821,47 @@ def append_canon_tag(cfg, tag, applies_to, definition):
     return True, "added to canon"
 
 
+def extend_canon_applies(cfg, tag, register):
+    """Add one register to an existing canon tag's applies-to list. Lock-guarded,
+    journaled, edits ONLY that tag's line. Returns (ok, message)."""
+    tf = expand((cfg or {}).get("tags_file") or "")
+    if not tf or not os.path.isfile(tf):
+        return False, "no tags_file configured"
+    tag = (tag or "").strip().lower()
+    register = (register or "").strip().upper()
+    if register not in ("E", "CE", "C", "M"):
+        return False, "register must be E, CE, C, or M"
+    with open(tf + ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            lines = open(tf, encoding="utf-8").read().split("\n")
+            hit = None
+            for i, ln in enumerate(lines):
+                if ln.lstrip().startswith("#") or not ln.strip():
+                    continue
+                parts = ln.split("\t")
+                if len(parts) >= 3 and parts[0].strip().lower() == tag:
+                    hit = i
+                    applies = [a.strip().upper() for a in parts[1].split(",") if a.strip()]
+                    if register in applies:
+                        return True, "already applies to %s" % register
+                    applies.append(register)
+                    parts[1] = ",".join(applies)
+                    lines[i] = "\t".join(parts)
+                    break
+            if hit is None:
+                return False, "tag %r not found in canon" % tag
+            tmp = tf + ".logboard-tmp"
+            open(tmp, "w", encoding="utf-8").write("\n".join(lines))
+            os.replace(tmp, tf)
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+    with open(AUDIT_LOG, "a", encoding="utf-8") as fh:
+        fh.write("%s\tcanon-extend\t%s\t+%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
+                                                  tag, register))
+    return True, "extended %s to apply in %s" % (tag, register)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = APP
 
@@ -1060,6 +1105,21 @@ class Handler(BaseHTTPRequestHandler):
             overall = all(r["ok"] for r in results) if results else False
             self._send(200, {"ok": overall, "applied": applied, "canon": canon_result,
                              "results": results})
+        elif path == "/canon":
+            # Extend an existing canon tag's applies-to (audit resolution for a
+            # wrong-register tag that genuinely fits). Local-admin only.
+            if not self._local_origin():
+                self._send(403, {"ok": False, "message": "local only"})
+                return
+            body = self._read_json_body()
+            cfg = load_config()
+            if (not isinstance(body, dict) or not cfg
+                    or not isinstance(body.get("tag"), str)
+                    or not isinstance(body.get("register"), str)):
+                self._send(400, {"ok": False, "message": "body must be {tag, register}"})
+                return
+            ok, msg = extend_canon_applies(cfg, body["tag"], body["register"])
+            self._send(200 if ok else 400, {"ok": ok, "message": msg})
         else:
             self._send(404, {"error": "not found"})
 
@@ -1178,38 +1238,58 @@ def run_check():
     return 1 if failures else 0
 
 
-def run_audit():
+def compute_audit(cfg, entries=None, canon=None, canon_warnings=None):
+    """Structured tag-audit findings, shared by --audit, /data.json, and /audit.
+    Returns {untagged:[{uid,log_type,summary}], unknown_tags, wrong_register,
+    canon_warnings, no_tags_file, counts}."""
+    if entries is None:
+        entries, _files, canon, canon_warnings = collect(cfg)
+    canon = canon or []
+    canon_warnings = canon_warnings or []
+    canon_names = set(t["tag"] for t in canon)
+    applies = dict((t["tag"], set(t["applies_to"])) for t in canon)
+    untagged = [{"uid": e["uid"], "log_type": e["log_type"], "summary": e["summary"]}
+                for e in entries if e["untagged"]]
+    unknown_tags, wrong_register = [], []
+    for e in entries:
+        reg = PREFIX[e["log_type"]]
+        for t in e["tags"]:
+            if canon_names and t not in canon_names:
+                unknown_tags.append({"uid": e["uid"], "log_type": e["log_type"], "tag": t})
+            elif canon_names and reg not in applies.get(t, set()):
+                wrong_register.append({"uid": e["uid"], "log_type": e["log_type"],
+                                       "tag": t, "register": reg})
+    no_tags_file = not cfg.get("tags_file")
+    problems = (len(untagged) + len(unknown_tags) + len(wrong_register)
+                + len(canon_warnings) + (1 if no_tags_file else 0))
+    return {"untagged": untagged, "unknown_tags": unknown_tags,
+            "wrong_register": wrong_register, "canon_warnings": list(canon_warnings),
+            "no_tags_file": no_tags_file,
+            "counts": {"entries": len(entries), "untagged": len(untagged),
+                       "problems": problems}}
+
+
+def run_audit(strict=False):
     cfg = load_config()
     if not cfg:
         print("audit: no roots.json — dashboard not configured")
         return 2
-    entries, files, canon, canon_warnings = collect(cfg)
-    problems = 0
-    if not cfg.get("tags_file"):
+    a = compute_audit(cfg)
+    if a["no_tags_file"]:
         print("audit: no tags_file configured")
-        problems += 1
-    for w in canon_warnings:
+    for w in a["canon_warnings"]:
         print("audit: canon: %s" % w)
-        problems += 1
-    untagged = [e for e in entries if e["untagged"]]
-    for e in untagged:
+    for e in a["untagged"]:
         print("audit: untagged: %s — %s" % (e["uid"], e["summary"][:70]))
-    problems += len(untagged)
-    canon_names = set(t["tag"] for t in canon)
-    applies = dict((t["tag"], set(t["applies_to"])) for t in canon)
-    for e in entries:
-        for t in e["tags"]:
-            if canon_names and t not in canon_names:
-                print("audit: unknown tag %r on %s" % (t, e["uid"]))
-                problems += 1
-            elif canon_names and PREFIX[e["log_type"]] not in applies.get(t, set()):
-                print("audit: tag %r not allowed in register %s (%s)"
-                      % (t, PREFIX[e["log_type"]], e["uid"]))
-                problems += 1
+    for u in a["unknown_tags"]:
+        print("audit: unknown tag %r on %s" % (u["tag"], u["uid"]))
+    for u in a["wrong_register"]:
+        print("audit: tag %r not allowed in register %s (%s)"
+              % (u["tag"], u["register"], u["uid"]))
     stamp = time.strftime("%Y-%m-%d %H:%M %Z")
     print("audit: %s — %d entries, %d untagged, %d problems"
-          % (stamp, len(entries), len(untagged), problems))
-    return 1 if problems else 0
+          % (stamp, a["counts"]["entries"], a["counts"]["untagged"], a["counts"]["problems"]))
+    return 1 if a["counts"]["problems"] else 0
 
 
 def main():
