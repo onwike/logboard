@@ -376,6 +376,50 @@ class AppErrorTests(TempConfigMixin, unittest.TestCase):
             self.fail("log_app_error raised: %s" % exc)
 
 
+class AuditTests(TempConfigMixin, unittest.TestCase):
+
+    def test_compute_audit_finds_all_problem_kinds(self):
+        # add an untagged entry, an off-canon tag, and a wrong-register tag
+        # fixture E02 has tags network,config (both valid for E); make problems:
+        # tag E03 with an off-canon tag, and tag CE02 with 'network' (network is E,CE,C so valid)
+        serve.edit_tags(self.cfg, "global:E03", ["network"], [])  # valid, leaves E03 tagged
+        # datetime applies to CE,M — putting it on a C entry is wrong-register
+        serve.edit_tags(self.cfg, "project-a:C02", ["network"], [])  # network is E,CE,C -> valid on C
+        a = serve.compute_audit(self.cfg)
+        # E01 (legacy, untagged) and C-entries without tags should be untagged
+        self.assertTrue(any(u["uid"] == "global:E01" for u in a["untagged"]))
+        self.assertIn("counts", a)
+        self.assertEqual(a["counts"]["problems"],
+                         len(a["untagged"]) + len(a["unknown_tags"]) + len(a["wrong_register"])
+                         + len(a["canon_warnings"]) + (1 if a["no_tags_file"] else 0))
+
+    def test_compute_audit_wrong_register_and_unknown(self):
+        # 'datetime' is CE,M in the fixture canon — invalid on an E entry (wrong register)
+        # inject directly by editing the register file (bypassing edit_tags' canon check)
+        p = self.paths["tool"]
+        text = open(p, encoding="utf-8").read().replace(
+            "### E03 — git hook skipped because hooksPath was unset\n",
+            "### E03 — git hook skipped because hooksPath was unset\n- **Tags:** datetime, bogustag\n")
+        open(p, "w", encoding="utf-8").write(text)
+        a = serve.compute_audit(self.cfg)
+        self.assertTrue(any(u["uid"] == "global:E03" and u["tag"] == "bogustag" for u in a["unknown_tags"]))
+        self.assertTrue(any(u["uid"] == "global:E03" and u["tag"] == "datetime" and u["register"] == "E"
+                            for u in a["wrong_register"]))
+
+    def test_extend_canon_applies(self):
+        ok, _ = serve.extend_canon_applies(self.cfg, "datetime", "E")  # datetime was CE,M
+        self.assertTrue(ok)
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        dt = [t for t in tags if t["tag"] == "datetime"][0]
+        self.assertIn("E", dt["applies_to"])
+        ok, msg = serve.extend_canon_applies(self.cfg, "datetime", "E")
+        self.assertIn("already applies", msg)
+        ok, _ = serve.extend_canon_applies(self.cfg, "nope", "E")
+        self.assertFalse(ok)
+        ok, _ = serve.extend_canon_applies(self.cfg, "datetime", "Z")
+        self.assertFalse(ok)
+
+
 class TaggingHelpTests(TempConfigMixin, unittest.TestCase):
     """Feature 1 backend, with the model mocked — the suite never calls a real LLM."""
 
@@ -627,6 +671,29 @@ class HttpTests(TempConfigMixin, unittest.TestCase):
             status, _, _ = self.req(path, data={"description": "x", "tag": "y", "uids": []},
                                     headers={"Origin": "https://evil.example"})
             self.assertEqual(status, 403, path)
+
+    def test_canon_endpoint_gated_and_works(self):
+        self.write_config()
+        # cross-origin is refused (CE37 parity)
+        status, _, _ = self.req("/canon", data={"tag": "datetime", "register": "E"},
+                                headers={"Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        # same-origin extend works
+        status, _, body = self.req("/canon", data={"tag": "datetime", "register": "E"},
+                                   headers={"Origin": "http://127.0.0.1:%d" % self.port})
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        tags, _ = serve.parse_canon(self.paths["tags"])
+        self.assertIn("E", [t for t in tags if t["tag"] == "datetime"][0]["applies_to"])
+
+    def test_audit_in_payload(self):
+        self.write_config()
+        status, _, body = self.req("/data.json")
+        a = json.loads(body)["audit"]
+        self.assertIsNotNone(a)
+        self.assertIn("untagged", a)
+        self.assertIn("wrong_register", a)
+        self.assertIn("problems", a["counts"])
 
     def test_config_post_origin_gated(self):
         # a cross-origin page must not be able to CSRF a config write
