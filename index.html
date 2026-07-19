@@ -68,6 +68,10 @@ header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
 #tblframe thead th{position:sticky;top:0;background:var(--surface);z-index:1}
 #appHealth{overflow-x:auto}
 #setup .frow{flex-wrap:wrap}
+.auditrow{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--grid);font-size:13px;flex-wrap:wrap}
+.auditrow:last-child{border-bottom:none}
+.auditrow select{font-size:12px;padding:2px 6px}
+.auditfix{flex:none;color:var(--emph);text-decoration:none;font-size:13px}
 .seg{display:flex;gap:2px;min-width:0}
 .hbar{height:13px;border-radius:3px;min-width:2px}
 table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
@@ -241,6 +245,14 @@ a{color:var(--ink2)}
     <span class="muted num" id="appHealthCount"></span>
   </div>
   <div id="appHealth"></div>
+</section>
+
+<section class="card">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <h2>Tag audit <span class="muted" style="font-weight:400">(untagged and off-canon tags — resolve them here)</span></h2>
+    <span class="muted num" id="auditCount"></span>
+  </div>
+  <div id="auditPanel"></div>
 </section>
 
 </main>
@@ -866,7 +878,72 @@ function renderAll(preservePage){
   renderHeader();renderWarnings();renderKpis(filtered);renderTrend(filtered);
   renderLanes(filtered);renderProjects(filtered);renderTopTags(filtered);
   renderTopCats(filtered);renderRepeat(filtered);renderDebt();renderTable(filtered);
-  renderAppHealth();
+  renderAppHealth();renderAudit();
+}
+function canonTagsFor(reg){
+  return ((DATA&&DATA.tag_canon)||[]).filter(function(t){return t.applies_to.indexOf(reg)>=0})
+    .map(function(t){return t.tag}).sort();
+}
+function auditResolveTag(uid,badTag,goodTag){
+  if(!goodTag)return;
+  fetch(endpoint+'/tags',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({uid:uid,add:[goodTag],remove:[badTag]})})
+  .then(function(r){return r.json()}).then(function(b){
+    if(!b.ok){showError('Resolve failed: '+(b.message||'?'));return}
+    $('#err').hidden=true;load();
+  }).catch(function(){showError('Resolve failed: server unreachable.')});
+}
+function auditExtendCanon(tag,reg){
+  fetch(endpoint+'/canon',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({tag:tag,register:reg})})
+  .then(function(r){return r.json()}).then(function(b){
+    if(!b.ok){showError('Canon extend failed: '+(b.message||'?'));return}
+    $('#err').hidden=true;load();
+  }).catch(function(){showError('Canon extend failed: server unreachable.')});
+}
+function renderAudit(){
+  var a=(DATA&&DATA.audit)||null;
+  var badge=$('#auditCount');
+  if(!a){badge.textContent='';$('#auditPanel').innerHTML='<div class="empty">Not configured.</div>';return}
+  var n=a.counts.problems;
+  badge.textContent=n?(n+' to resolve'):'clean';
+  badge.style.color=n?'var(--bad)':'var(--good)';
+  if(!n){$('#auditPanel').innerHTML='<div class="empty">Every entry is tagged and every tag is valid. ✓</div>';return}
+  var h='';
+  if(a.no_tags_file)h+='<div class="res-bad">No tag canon configured — set a tags file in settings.</div>';
+  a.canon_warnings.forEach(function(w){h+='<div class="res-bad">canon: '+esc(w)+'</div>'});
+  // untagged
+  if(a.untagged.length){
+    h+='<h3 style="font-size:14px;margin:10px 0 4px">Untagged ('+a.untagged.length+')</h3>';
+    a.untagged.forEach(function(u){
+      h+='<div class="auditrow"><span class="mono" style="width:110px;flex:none">'+esc(u.uid)+'</span>'+
+         '<span style="flex:1" class="muted">'+esc(u.summary.slice(0,70))+'</span>'+
+         '<a href="#'+esc(u.uid.split(":")[1])+'" class="auditfix">tag it →</a></div>';
+    });
+  }
+  // off-canon + wrong-register
+  var probs=a.unknown_tags.map(function(u){return {uid:u.uid,tag:u.tag,reg:TYPE[u.log_type].pre,kind:'unknown'}})
+    .concat(a.wrong_register.map(function(u){return {uid:u.uid,tag:u.tag,reg:u.register,kind:'wrong'}}));
+  if(probs.length){
+    h+='<h3 style="font-size:14px;margin:12px 0 4px">Tag problems ('+probs.length+')</h3>';
+    probs.forEach(function(p,i){
+      var opts=canonTagsFor(p.reg).map(function(t){return '<option>'+esc(t)+'</option>'}).join('');
+      h+='<div class="auditrow"><span class="mono" style="width:110px;flex:none">'+esc(p.uid)+'</span>'+
+         '<span style="flex:none">tag <span class="pill">'+esc(p.tag)+'</span> '+
+         (p.kind==='unknown'?'not in canon':'not valid for '+esc(p.reg))+'</span>'+
+         '<span style="flex:1"></span>'+
+         '<span class="muted">replace →</span> <select data-fixuid="'+esc(p.uid)+'" data-fixbad="'+esc(p.tag)+'"><option value="">choose…</option>'+opts+'</select>'+
+         (p.kind==='wrong'?(' <button data-extendtag="'+esc(p.tag)+'" data-extendreg="'+esc(p.reg)+'">allow '+esc(p.tag)+' in '+esc(p.reg)+'</button>'):'')+
+         '</div>';
+    });
+  }
+  $('#auditPanel').innerHTML=h;
+  $$('#auditPanel select[data-fixuid]').forEach(function(s){
+    s.addEventListener('change',function(){auditResolveTag(s.getAttribute('data-fixuid'),s.getAttribute('data-fixbad'),s.value)});
+  });
+  $$('#auditPanel button[data-extendtag]').forEach(function(btn){
+    btn.addEventListener('click',function(){auditExtendCanon(btn.getAttribute('data-extendtag'),btn.getAttribute('data-extendreg'))});
+  });
 }
 function renderAppHealth(){
   var errs=(DATA&&DATA.app_errors)||[];

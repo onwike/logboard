@@ -11,6 +11,27 @@
 A release's quality level is the certification tier it actually passed; a tag never
 claims a tier that was not earned. Untiered tags carry their gate evidence instead.
 
+## v2.01.00 — tag-audit resolution + weekly sweep (2026-07-19)
+
+**Minor.** The tag audit was detect-only (the daily `--audit` job flagged untagged /
+off-canon / wrong-register tags but nothing resolved them, so they accumulated). This
+release makes the audit *actionable*:
+- **`compute_audit()`** shared by `--audit`, `/data.json`, and the dashboard — findings
+  now ride in the payload.
+- **"Tag audit" panel** in the dashboard: lists every untagged entry (with a jump to its
+  tag editor) and every off-canon / wrong-register tag with inline resolution — a
+  canon-tag replacement dropdown (via `/tags`) or an "allow \<tag\> in \<register\>"
+  button that extends the canon (new `POST /canon` → `extend_canon_applies`,
+  local-admin-gated, lock-guarded, journaled).
+- **Weekly strict sweep** added (`com.onwike.logboard-audit-weekly`, Sundays 6:00 pm)
+  alongside the existing daily job.
+
+**Quality level:** untiered minor. Gates: `test_logboard.py` 53/53 (incl. `/canon`
+cross-origin 403, audit-in-payload, extend/compute-audit units); `serve.py --check`
+31/0; browser-verified the panel + a live canon-extend resolution.
+
+**Carried forward:** none.
+
 ## v2.00.01 — fix stuck Tagging-help modal (2026-07-17)
 
 **Patch.** The `#wiz` modal set `display:flex` unconditionally in CSS, which overrides

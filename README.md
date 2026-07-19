@@ -91,6 +91,8 @@ Semantics worth knowing:
 0 18 * * * cd /path/to/logboard && python3 serve.py --audit >> audit.log 2>&1
 ```
 
+The audit is also **actionable in the dashboard**: the **Tag audit** panel lists every untagged entry (with a jump to its tag editor) and every off-canon or wrong-register tag with inline resolution — pick a canon tag to replace it, or click "allow \<tag\> in \<register\>" to extend the canon's applies-to (that's a `POST /canon` write: local-admin-only, lock-guarded, journaled). So the audit doesn't just flag problems, it drives them to zero.
+
 ## Hosting the page elsewhere (optional)
 
 The frontend is one static file. Host `index.html` anywhere, open its settings panel and point the data-endpoint field at your local server, and add the page's origin to `allowed_origins` in `roots.json`. serve.py answers CORS and private-network preflights only for origins you list (default: none). If you reach the server through a tunnel hostname rather than `127.0.0.1`, also add that hostname to `allowed_hosts` (the Host-header gate rejects everything else). Your registers still live only on the machine running serve.py — the remote page just reads them.
