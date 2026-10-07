@@ -31,15 +31,13 @@ jobs:
           set +e
           gh api --method POST "repos/${{ github.repository }}/pages" \
             -H "Accept: application/vnd.github+json" \
-            --input - <<'JSON'
-          {"build_type":"workflow"}
-          JSON
+            -f build_type=workflow
           echo "workflow_source_exit:$?"
           gh api --method POST "repos/${{ github.repository }}/pages" \
             -H "Accept: application/vnd.github+json" \
-            --input - <<'JSON'
-          {"build_type":"legacy","source":{"branch":"main","path":"/docs"}}
-          JSON
+            -f build_type=legacy \
+            -f source[branch]=main \
+            -f source[path]=/docs
           echo "legacy_source_exit:$?"
           gh api "repos/${{ github.repository }}/pages" || true
       - uses: actions/checkout@v4
